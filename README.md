@@ -1,7 +1,7 @@
 # InstaRetriv AI
 
-InstaRetriv AI is your personal WhatsApp-based document retrieval assistant.
-Ask naturally, and get your file back instantly.
+InstaRetriv AI is a personal WhatsApp-based document retrieval assistant.
+Ask naturally and get your important file in seconds.
 
 ## Try These Prompts
 
@@ -52,6 +52,17 @@ Ask naturally, and get your file back instantly.
 ## Project Vision
 
 Reduce friction in accessing important personal documents through simple natural language chat over WhatsApp.
+
+## Why This Can Change The World
+
+Small tools can create massive impact when they remove everyday friction.
+
+- Faster access in urgent moments: people can instantly retrieve identity, education, or medical documents when timing matters.
+- Better inclusion: WhatsApp is already familiar to millions, so users do not need to learn a new app.
+- Lower digital barriers: natural language requests are easier than searching folders or navigating complex portals.
+- A practical foundation: this personal assistant model can evolve into family, school, clinic, and community document helpers.
+
+The bigger idea is simple: when essential information is easier to access, people can act faster, miss fewer opportunities, and solve real problems with less stress.
 
 ## Coming Soon
 
