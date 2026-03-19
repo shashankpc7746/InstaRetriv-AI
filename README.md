@@ -66,8 +66,23 @@ The bigger idea is simple: when essential information is easier to access, peopl
 
 ## Coming Soon
 
-- Core FastAPI scaffold
-- Upload endpoint (/upload)
-- WhatsApp webhook endpoint (/webhook)
-- Retrieval matcher with tag + synonym support
-- End-to-end MVP demo on Twilio Sandbox
+- Twilio media sending from webhook matches
+- Persistent cloud storage support (AWS S3 or Firebase Storage)
+- MongoDB or Firestore integration for production metadata
+- Better fuzzy matching and ranking controls
+- End-to-end live demo on Twilio Sandbox
+
+## Quick Start
+
+1. Create and activate a virtual environment.
+2. Install dependencies from requirements.txt.
+3. Copy .env.example to .env and fill values if needed.
+4. Run the app with: python run.py
+5. Open docs at: http://127.0.0.1:8000/docs
+
+### First API Checks
+
+- GET /health
+- POST /upload with form fields: file, doc_category, tags
+- GET /get-document?query=send my resume
+- POST /webhook with Twilio form fields Body and From
