@@ -58,6 +58,9 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 ---
 
 ## Phase 2 - Upload Pipeline
+### Status
+Completed (MVP)
+
 ### Tasks
 - Build `POST /upload` endpoint
 - Accept file + tags + category
@@ -72,6 +75,9 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 ---
 
 ## Phase 3 - WhatsApp Webhook Integration
+### Status
+Completed (MVP baseline)
+
 ### Tasks
 - Build `POST /webhook` endpoint for Twilio inbound messages
 - Parse incoming message text
@@ -85,6 +91,9 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 ---
 
 ## Phase 4 - Retrieval Logic
+### Status
+Completed (MVP baseline)
+
 ### Tasks
 - Build internal retrieval service (`get_document` logic)
 - Implement keyword-to-tag matching
@@ -99,6 +108,9 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 ---
 
 ## Phase 5 - Send Document via WhatsApp
+### Status
+Partially completed
+
 ### Tasks
 - On successful match, fetch file reference from storage
 - Send document using Twilio WhatsApp media API
@@ -107,9 +119,17 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 ### Deliverables
 - End-to-end flow: user message -> document returned on WhatsApp
 
+### Implemented so far
+- Added outbound Twilio sender service (text and media).
+- Added file serving endpoint (`GET /files/{document_id}`) for Twilio media URL fetch.
+- Added `PUBLIC_BASE_URL` driven media URL generation in webhook flow.
+
 ---
 
 ## Phase 6 - Logging, Reliability, and Hardening
+### Status
+Partially completed
+
 ### Tasks
 - Log inbound message, parsed query, match result, outbound response
 - Add request IDs and timestamped logs
@@ -119,6 +139,11 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 ### Deliverables
 - Structured logs for debugging
 - Improved reliability for real usage
+
+### Implemented so far
+- Added request ID middleware (`X-Request-ID` response header).
+- Added persistent JSON request logs and endpoint (`GET /logs/recent`).
+- Added health endpoint.
 
 ---
 
@@ -165,4 +190,4 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 - Version history UI/dashboard
 
 ## Next Step for Future Session
-Start with **Phase 0 + Phase 1** implementation in code (project scaffold, dependencies, config, data/storage modules).
+Complete Twilio end-to-end media delivery test with a public URL, then move metadata from local JSON to MongoDB/Firestore.

@@ -25,6 +25,8 @@ Ask naturally and get your important file in seconds.
 - Document upload with manual tags
 - Keyword-based retrieval (fuzzy matching upgrade-ready)
 - Request and response logging for debugging
+- Request ID tracking on every API response (`X-Request-ID`)
+- Local file serving endpoint for Twilio media fetch flow
 
 ## Planned Tech Stack
 
@@ -40,14 +42,19 @@ Ask naturally and get your important file in seconds.
 	- Upload document with tags and category
 - POST /webhook
 	- Receive WhatsApp messages and trigger retrieval
-- Internal get-document logic
+- GET /get-document
 	- Match request to stored document metadata
+- GET /files/{document_id}
+	- Serve stored file for document delivery
+- GET /logs/recent
+	- View recent request logs for debugging
 
 ## Quick Project Status
 
 - Roadmap is defined.
-- MVP implementation begins phase-by-phase.
-- Current focus: setup, upload pipeline, and webhook wiring.
+- MVP backend foundation is implemented.
+- Upload, retrieval, webhook, and logging endpoints are live.
+- Current focus: Twilio end-to-end media delivery testing via public URL.
 
 ## Project Vision
 
@@ -66,7 +73,6 @@ The bigger idea is simple: when essential information is easier to access, peopl
 
 ## Coming Soon
 
-- Twilio media sending from webhook matches
 - Persistent cloud storage support (AWS S3 or Firebase Storage)
 - MongoDB or Firestore integration for production metadata
 - Better fuzzy matching and ranking controls
@@ -86,3 +92,18 @@ The bigger idea is simple: when essential information is easier to access, peopl
 - POST /upload with form fields: file, doc_category, tags
 - GET /get-document?query=send my resume
 - POST /webhook with Twilio form fields Body and From
+- GET /logs/recent?limit=20
+
+### Twilio Media Sending Notes
+
+- Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_WHATSAPP_FROM` in `.env`.
+- Set `PUBLIC_BASE_URL` to your public server URL (example: ngrok URL).
+- Webhook will send media when both Twilio credentials and `PUBLIC_BASE_URL` are configured.
+
+### Implemented in This Iteration
+
+- Upload validation for allowed file extensions.
+- Persistent request log file for upload, retrieval, and webhook events.
+- Request ID middleware for traceability.
+- Outbound Twilio text/media sending service.
+- File serving endpoint used for WhatsApp media delivery.
