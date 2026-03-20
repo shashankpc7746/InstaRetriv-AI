@@ -11,10 +11,14 @@ class Settings(BaseSettings):
 
     upload_dir: str = "uploads"
     metadata_file: str = "data/metadata.json"
+    request_log_file: str = "data/request_logs.json"
+
+    allowed_extensions: str = "pdf,png,jpg,jpeg,webp,doc,docx"
 
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_whatsapp_from: str = "whatsapp:+14155238886"
+    public_base_url: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -23,6 +27,12 @@ class Settings(BaseSettings):
         if not self.authorized_senders.strip():
             return []
         return [item.strip() for item in self.authorized_senders.split(",") if item.strip()]
+
+    @property
+    def allowed_extensions_list(self) -> list[str]:
+        if not self.allowed_extensions.strip():
+            return []
+        return [item.strip().lower() for item in self.allowed_extensions.split(",") if item.strip()]
 
 
 settings = Settings()
