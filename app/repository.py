@@ -29,3 +29,9 @@ class MetadataRepository:
     def list_active(self) -> list[DocumentMetadata]:
         return [doc for doc in self._read_all() if doc.is_active]
 
+    def get_by_id(self, document_id: str) -> DocumentMetadata | None:
+        for document in self._read_all():
+            if document.id == document_id:
+                return document
+        return None
+
