@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
@@ -12,6 +12,7 @@ from app.repository import MetadataRepository
 from app.schemas import DocumentMetadata, RetrievalResult, UploadResponse, WebhookResponse
 from app.services.matcher import find_best_document
 from app.services.storage import LocalStorageService
+from app.services.twilio_validation import is_valid_twilio_signature
 from app.services.whatsapp import WhatsAppSender
 
 logging.basicConfig(
@@ -36,9 +37,30 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = str(uuid4())
         request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        except Exception as exc:
+            logger.exception("Unhandled error on request_id=%s", request_id)
+            request_logs.add(
+                {
+                    "request_id": request_id,
+                    "type": "unhandled-error",
+                    "path": str(request.url.path),
+                    "method": request.method,
+                    "error": str(exc),
+                }
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "message": "Internal server error",
+                    "request_id": request_id,
+                },
+                headers={"X-Request-ID": request_id},
+            )
 
 
 app.add_middleware(RequestIDMiddleware)
@@ -114,6 +136,27 @@ def get_document(query: str, request: Request) -> RetrievalResult:
     return result
 
 
+@app.get("/documents", response_model=list[DocumentMetadata])
+def list_documents(active_only: bool = True) -> list[DocumentMetadata]:
+    return repository.list_active() if active_only else repository.list_all()
+
+
+@app.delete("/documents/{document_id}")
+def archive_document(document_id: str, request: Request) -> dict[str, str]:
+    archived = repository.deactivate(document_id)
+    if not archived:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    request_logs.add(
+        {
+            "request_id": request.state.request_id,
+            "type": "archive-document",
+            "doc_id": document_id,
+        }
+    )
+    return {"message": "Document archived"}
+
+
 @app.get("/files/{document_id}")
 def serve_document_file(document_id: str):
     document = repository.get_by_id(document_id)
@@ -135,16 +178,41 @@ def recent_logs(limit: int = 20) -> list[dict]:
 
 
 @app.post("/webhook", response_model=WebhookResponse)
-def whatsapp_webhook(
-    request: Request,
-    Body: str = Form(default=""),
-    From: str = Form(default=""),
-) -> WebhookResponse:
-    if settings.authorized_senders_list and From not in settings.authorized_senders_list:
-        logger.warning("Unauthorized sender blocked: %s", From)
+async def whatsapp_webhook(request: Request) -> WebhookResponse:
+    form = await request.form()
+    body = str(form.get("Body", ""))
+    sender = str(form.get("From", ""))
+
+    if settings.require_twilio_signature:
+        signature = request.headers.get("X-Twilio-Signature", "")
+        form_data = {key: str(value) for key, value in form.items()}
+        is_valid_signature = is_valid_twilio_signature(
+            auth_token=settings.twilio_auth_token,
+            request_url=str(request.url),
+            form_data=form_data,
+            signature=signature,
+        )
+        if not is_valid_signature:
+            logger.warning("Invalid Twilio signature blocked for request_id=%s", request.state.request_id)
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "webhook",
+                    "sender": sender,
+                    "query": body,
+                    "found": False,
+                    "doc_id": None,
+                    "twilio_sid": None,
+                    "error": "invalid-twilio-signature",
+                }
+            )
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    if settings.authorized_senders_list and sender not in settings.authorized_senders_list:
+        logger.warning("Unauthorized sender blocked: %s", sender)
         return WebhookResponse(message="Unauthorized sender.")
 
-    result = find_best_document(Body, repository.list_active())
+    result = find_best_document(body, repository.list_active())
 
     if result.found and result.document is not None:
         message = f"Document found: {result.document.file_name}."
@@ -153,30 +221,30 @@ def whatsapp_webhook(
         if whatsapp_sender.enabled and settings.public_base_url.strip():
             media_url = f"{settings.public_base_url.rstrip('/')}/files/{result.document.id}"
             message_sid = whatsapp_sender.send_media(
-                to_number=From,
+                to_number=sender,
                 body=f"Sharing: {result.document.file_name}",
                 media_url=media_url,
             )
             message = "Document found and sent to your WhatsApp."
         elif whatsapp_sender.enabled:
             message_sid = whatsapp_sender.send_text(
-                to_number=From,
+                to_number=sender,
                 body=f"Document found: {result.document.file_name}. Set PUBLIC_BASE_URL to enable file delivery.",
             )
             message = "Document found. Configure PUBLIC_BASE_URL to send files."
 
         logger.info(
             "Webhook matched document: sender=%s query=%s doc_id=%s",
-            From,
-            Body,
+            sender,
+            body,
             result.document.id,
         )
         request_logs.add(
             {
                 "request_id": request.state.request_id,
                 "type": "webhook",
-                "sender": From,
-                "query": Body,
+                "sender": sender,
+                "query": body,
                 "found": True,
                 "doc_id": result.document.id,
                 "twilio_sid": message_sid,
@@ -187,13 +255,13 @@ def whatsapp_webhook(
             matched_document_id=result.document.id,
         )
 
-    logger.info("Webhook no document match: sender=%s query=%s", From, Body)
+    logger.info("Webhook no document match: sender=%s query=%s", sender, body)
     request_logs.add(
         {
             "request_id": request.state.request_id,
             "type": "webhook",
-            "sender": From,
-            "query": Body,
+            "sender": sender,
+            "query": body,
             "found": False,
             "doc_id": None,
             "twilio_sid": None,

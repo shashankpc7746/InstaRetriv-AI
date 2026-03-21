@@ -26,8 +26,28 @@ class MetadataRepository:
         self._write_all(documents)
         return document
 
+    def list_all(self) -> list[DocumentMetadata]:
+        return self._read_all()
+
     def list_active(self) -> list[DocumentMetadata]:
         return [doc for doc in self._read_all() if doc.is_active]
+
+    def deactivate(self, document_id: str) -> bool:
+        documents = self._read_all()
+        updated = False
+
+        for index, document in enumerate(documents):
+            if document.id == document_id:
+                if not document.is_active:
+                    return True
+                documents[index] = document.model_copy(update={"is_active": False})
+                updated = True
+                break
+
+        if updated:
+            self._write_all(documents)
+            return True
+        return False
 
     def get_by_id(self, document_id: str) -> DocumentMetadata | None:
         for document in self._read_all():
