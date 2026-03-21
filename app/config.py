@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_whatsapp_from: str = "whatsapp:+14155238886"
     public_base_url: str = ""
+    require_twilio_signature: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
