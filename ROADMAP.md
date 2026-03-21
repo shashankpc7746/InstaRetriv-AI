@@ -56,7 +56,7 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 - Storage utility functions (save, fetch path/url)
 
 ---
-
+ 
 ## Phase 2 - Upload Pipeline
 ### Status
 Completed (MVP)
@@ -87,6 +87,9 @@ Completed (MVP baseline)
 ### Deliverables
 - Twilio Sandbox connected to webhook
 - Incoming message successfully handled by FastAPI
+
+### Implemented so far
+- Optional Twilio signature verification support via config toggle.
 
 ---
 
@@ -144,10 +147,28 @@ Partially completed
 - Added request ID middleware (`X-Request-ID` response header).
 - Added persistent JSON request logs and endpoint (`GET /logs/recent`).
 - Added health endpoint.
+- Added global middleware fallback for unhandled exceptions with request ID tracing.
+
+---
+
+## Phase 6.5 - Document Lifecycle Management
+### Status
+Completed (MVP utility)
+
+### Tasks
+- Add endpoint to list stored documents.
+- Add endpoint to archive/deactivate a document without deleting metadata.
+
+### Deliverables
+- `GET /documents` endpoint for active/all view.
+- `DELETE /documents/{document_id}` endpoint for soft archive.
 
 ---
 
 ## Phase 7 - Testing and Validation
+### Status
+In progress
+
 ### Tasks
 - Test known queries: "send my resume", "give cv", "need my aadhaar"
 - Test unknown query behavior
@@ -157,6 +178,10 @@ Partially completed
 ### Deliverables
 - Test checklist and pass/fail report
 - Confirmed MVP acceptance criteria
+
+### Implemented so far
+- Added pytest-based unit tests for matcher behavior.
+- Added pytest-based tests for repository add/deactivate flow.
 
 ---
 

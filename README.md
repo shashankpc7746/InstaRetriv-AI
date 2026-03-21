@@ -27,6 +27,9 @@ Ask naturally and get your important file in seconds.
 - Request and response logging for debugging
 - Request ID tracking on every API response (`X-Request-ID`)
 - Local file serving endpoint for Twilio media fetch flow
+- Optional Twilio signature verification for webhook security
+- Global error handling with request-level trace IDs
+- Document list and archive management endpoints
 
 ## Planned Tech Stack
 
@@ -48,6 +51,10 @@ Ask naturally and get your important file in seconds.
 	- Serve stored file for document delivery
 - GET /logs/recent
 	- View recent request logs for debugging
+- GET /documents
+	- List documents (active only by default)
+- DELETE /documents/{document_id}
+	- Archive a document (soft deactivate)
 
 ## Quick Project Status
 
@@ -93,11 +100,13 @@ The bigger idea is simple: when essential information is easier to access, peopl
 - GET /get-document?query=send my resume
 - POST /webhook with Twilio form fields Body and From
 - GET /logs/recent?limit=20
+- GET /documents?active_only=true
 
 ### Twilio Media Sending Notes
 
 - Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_WHATSAPP_FROM` in `.env`.
 - Set `PUBLIC_BASE_URL` to your public server URL (example: ngrok URL).
+- Set `REQUIRE_TWILIO_SIGNATURE=true` in production to validate webhook authenticity.
 - Webhook will send media when both Twilio credentials and `PUBLIC_BASE_URL` are configured.
 
 ### Implemented in This Iteration
@@ -107,3 +116,12 @@ The bigger idea is simple: when essential information is easier to access, peopl
 - Request ID middleware for traceability.
 - Outbound Twilio text/media sending service.
 - File serving endpoint used for WhatsApp media delivery.
+- Twilio signature validation helper and optional webhook verification toggle.
+- Global middleware handling for unexpected errors.
+- Document listing and archive endpoints.
+- Basic pytest coverage for matcher and repository flows.
+
+### Run Tests
+
+1. Install test dependency from requirements-dev.txt.
+2. Run: python -m pytest -q
