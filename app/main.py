@@ -71,6 +71,17 @@ def health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name, "env": settings.app_env}
 
 
+@app.get("/setup/status")
+def setup_status() -> dict[str, bool]:
+    return {
+        "twilio_sid_set": bool(settings.twilio_account_sid.strip()),
+        "twilio_auth_token_set": bool(settings.twilio_auth_token.strip()),
+        "twilio_whatsapp_from_set": bool(settings.twilio_whatsapp_from.strip()),
+        "public_base_url_set": bool(settings.public_base_url.strip()),
+        "require_twilio_signature": settings.require_twilio_signature,
+    }
+
+
 @app.post("/upload", response_model=UploadResponse)
 async def upload_document(
     request: Request,
