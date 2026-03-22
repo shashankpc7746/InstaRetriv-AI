@@ -55,6 +55,8 @@ Ask naturally and get your important file in seconds.
 	- List documents (active only by default)
 - DELETE /documents/{document_id}
 	- Archive a document (soft deactivate)
+- GET /setup/status
+	- Check Twilio and public URL setup readiness (no secrets exposed)
 
 ## Quick Project Status
 
@@ -89,13 +91,20 @@ The bigger idea is simple: when essential information is easier to access, peopl
 
 1. Create and activate a virtual environment.
 2. Install dependencies from requirements.txt.
-3. Copy .env.example to .env and fill values if needed.
+3. Open .env and fill values when ready (template is pre-created).
 4. Run the app with: python run.py
 5. Open docs at: http://127.0.0.1:8000/docs
+
+### Dev Helper Commands (PowerShell)
+
+- Start app: .\scripts\start_dev.ps1
+- Start app with reload: .\scripts\start_dev.ps1 -Reload
+- Check setup and API health: .\scripts\check_setup.ps1
 
 ### First API Checks
 
 - GET /health
+- GET /setup/status
 - POST /upload with form fields: file, doc_category, tags
 - GET /get-document?query=send my resume
 - POST /webhook with Twilio form fields Body and From
@@ -108,6 +117,17 @@ The bigger idea is simple: when essential information is easier to access, peopl
 - Set `PUBLIC_BASE_URL` to your public server URL (example: ngrok URL).
 - Set `REQUIRE_TWILIO_SIGNATURE=true` in production to validate webhook authenticity.
 - Webhook will send media when both Twilio credentials and `PUBLIC_BASE_URL` are configured.
+
+### Twilio Go-Live Checklist
+
+1. Start API: .\scripts\start_dev.ps1
+2. Start ngrok on port 8000 and copy HTTPS URL.
+3. Set `PUBLIC_BASE_URL` in `.env` with ngrok URL.
+4. In Twilio sandbox, set incoming webhook URL to `<PUBLIC_BASE_URL>/webhook`.
+5. Send join code from your WhatsApp to Twilio sandbox number.
+6. Upload one test document via `/upload`.
+7. Send WhatsApp message: "Send my resume".
+8. Inspect `/logs/recent` if anything fails.
 
 ### Implemented in This Iteration
 

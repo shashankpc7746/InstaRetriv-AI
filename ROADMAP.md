@@ -195,6 +195,11 @@ In progress
 - Live prototype URL
 - Stable WhatsApp retrieval demo
 
+### Setup Preparation Completed
+- Added pre-created `.env` template for local setup.
+- Added helper scripts for start and setup checks.
+- Added `GET /setup/status` endpoint to verify Twilio/public URL readiness.
+
 ---
 
 ## Implementation Order (Strict)
@@ -215,4 +220,4 @@ In progress
 - Version history UI/dashboard
 
 ## Next Step for Future Session
-Complete Twilio end-to-end media delivery test with a public URL, then move metadata from local JSON to MongoDB/Firestore.
+Finish live Twilio end-to-end test (ngrok + sandbox webhook + media send), then move metadata from local JSON to MongoDB/Firestore.
