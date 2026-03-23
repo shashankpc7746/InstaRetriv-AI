@@ -30,6 +30,7 @@ whatsapp_sender = WhatsAppSender(
     account_sid=settings.twilio_account_sid,
     auth_token=settings.twilio_auth_token,
     sender=settings.twilio_whatsapp_from,
+    retries=settings.twilio_send_retries,
 )
 
 
@@ -236,13 +237,19 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 body=f"Sharing: {result.document.file_name}",
                 media_url=media_url,
             )
-            message = "Document found and sent to your WhatsApp."
+            if message_sid:
+                message = "Document found and sent to your WhatsApp."
+            else:
+                message = "Document found but delivery failed. Please retry in a moment."
         elif whatsapp_sender.enabled:
             message_sid = whatsapp_sender.send_text(
                 to_number=sender,
                 body=f"Document found: {result.document.file_name}. Set PUBLIC_BASE_URL to enable file delivery.",
             )
-            message = "Document found. Configure PUBLIC_BASE_URL to send files."
+            if message_sid:
+                message = "Document found. Configure PUBLIC_BASE_URL to send files."
+            else:
+                message = "Document found but message delivery failed. Please retry."
 
         logger.info(
             "Webhook matched document: sender=%s query=%s doc_id=%s",
