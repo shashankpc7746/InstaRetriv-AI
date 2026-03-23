@@ -126,6 +126,7 @@ Partially completed
 - Added outbound Twilio sender service (text and media).
 - Added file serving endpoint (`GET /files/{document_id}`) for Twilio media URL fetch.
 - Added `PUBLIC_BASE_URL` driven media URL generation in webhook flow.
+- Added Twilio retry logic for outbound messages with graceful fallback responses.
 
 ---
 
@@ -182,6 +183,7 @@ In progress
 ### Implemented so far
 - Added pytest-based unit tests for matcher behavior.
 - Added pytest-based tests for repository add/deactivate flow.
+- Added API integration tests for setup status, upload/retrieve, and archive flows.
 
 ---
 

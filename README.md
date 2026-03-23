@@ -30,6 +30,7 @@ Ask naturally and get your important file in seconds.
 - Optional Twilio signature verification for webhook security
 - Global error handling with request-level trace IDs
 - Document list and archive management endpoints
+- Twilio send retry and graceful fallback messaging on delivery failure
 
 ## Planned Tech Stack
 
@@ -114,6 +115,7 @@ The bigger idea is simple: when essential information is easier to access, peopl
 ### Twilio Media Sending Notes
 
 - Set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_WHATSAPP_FROM` in `.env`.
+- Optionally tune `TWILIO_SEND_RETRIES` in `.env` (default: 2).
 - Set `PUBLIC_BASE_URL` to your public server URL (example: ngrok URL).
 - Set `REQUIRE_TWILIO_SIGNATURE=true` in production to validate webhook authenticity.
 - Webhook will send media when both Twilio credentials and `PUBLIC_BASE_URL` are configured.
@@ -140,8 +142,10 @@ The bigger idea is simple: when essential information is easier to access, peopl
 - Global middleware handling for unexpected errors.
 - Document listing and archive endpoints.
 - Basic pytest coverage for matcher and repository flows.
+- API integration tests for setup, upload/retrieve, and archive flows.
 
 ### Run Tests
 
 1. Install test dependency from requirements-dev.txt.
 2. Run: python -m pytest -q
+3. Current coverage includes matcher, repository, and core API flow tests.
