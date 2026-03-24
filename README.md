@@ -148,4 +148,34 @@ The bigger idea is simple: when essential information is easier to access, peopl
 
 1. Install test dependency from requirements-dev.txt.
 2. Run: python -m pytest -q
-3. Current coverage includes matcher, repository, and core API flow tests.
+3. Current coverage: 26 tests across core functionality, webhook endpoints, and error handling.
+
+#### Test Categories
+
+**Core Functionality Tests (3 tests)**
+- Setup status endpoint validation
+- Upload → retrieval flow with document matching
+- Document listing and archive lifecycle
+
+**Webhook Endpoint Tests (9 tests)**
+- Document match and response generation
+- No document found scenarios
+- Missing required fields (From, Body) handling
+- Invalid Twilio signature rejection (when enabled)
+- Unauthorized sender filtering
+- Request logging on webhook events
+- Response header validation (X-Request-ID)
+
+**Error Handling & Validation Tests (12 tests)**
+- Invalid file uploads (missing name, unsupported extensions)
+- Missing or invalid required fields (tags, queries)
+- API constraint validation (log limits, document IDs)
+- Nonexistent resource handling (404 responses)
+- Request ID header presence on all responses
+- Health endpoint status validation
+
+**Unit Tests (2 tests)**
+- Document matcher with synonyms
+- Tie-break scoring by recency
+
+All tests run in isolation with temporary storage (tmp_path fixture) to ensure clean state.
