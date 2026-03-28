@@ -64,7 +64,8 @@ Ask naturally and get your important file in seconds.
 - Roadmap is defined.
 - MVP backend foundation is implemented.
 - Upload, retrieval, webhook, and logging endpoints are live.
-- Current focus: Twilio end-to-end media delivery testing via public URL.
+- Twilio Sandbox end-to-end flow is validated with live WhatsApp document delivery.
+- Current focus: security hardening and deployment readiness.
 
 ## Project Vision
 
@@ -86,7 +87,7 @@ The bigger idea is simple: when essential information is easier to access, peopl
 - Persistent cloud storage support (AWS S3 or Firebase Storage)
 - MongoDB or Firestore integration for production metadata
 - Better fuzzy matching and ranking controls
-- End-to-end live demo on Twilio Sandbox
+- Production deployment (Render/Railway/VPS) with stable public URL
 
 ## Quick Start
 
@@ -130,6 +131,14 @@ The bigger idea is simple: when essential information is easier to access, peopl
 6. Upload one test document via `/upload`.
 7. Send WhatsApp message: "Send my resume".
 8. Inspect `/logs/recent` if anything fails.
+
+### Latest Milestone (Completed)
+
+- ngrok tunnel configured and working.
+- Twilio Sandbox webhook connected to `/webhook`.
+- WhatsApp participant joined sandbox successfully.
+- End-to-end test passed: "send my resume" returned the uploaded PDF.
+- Integration and validation test suite remains green (26 passing tests).
 
 ### Implemented in This Iteration
 
