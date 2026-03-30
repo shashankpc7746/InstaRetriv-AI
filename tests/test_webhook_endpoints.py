@@ -23,6 +23,8 @@ def _configure_test_state(tmp_path: Path) -> None:
     main_module.repository = MetadataRepository(str(metadata_file))
     main_module.request_logs = RequestLogRepository(str(request_log_file))
     main_module.storage_service = LocalStorageService(str(upload_dir))
+    main_module.settings.require_twilio_signature = False
+    main_module.settings.authorized_senders = ""
 
 
 def _add_test_document(client: TestClient) -> str:
