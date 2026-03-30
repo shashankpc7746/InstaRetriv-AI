@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
+    twilio_secondary_auth_token: str = ""
     twilio_whatsapp_from: str = "whatsapp:+14155238886"
     twilio_send_retries: int = 2
     public_base_url: str = ""
