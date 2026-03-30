@@ -198,14 +198,33 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
     if settings.require_twilio_signature:
         signature = request.headers.get("X-Twilio-Signature", "")
         form_data = {key: str(value) for key, value in form.items()}
-        is_valid_signature = is_valid_twilio_signature(
-            auth_token=settings.twilio_auth_token,
-            request_url=str(request.url),
-            form_data=form_data,
-            signature=signature,
+        # Twilio signs against the public URL; use PUBLIC_BASE_URL behind tunnels/proxies.
+        validation_url = str(request.url)
+        if settings.public_base_url.strip():
+            validation_url = f"{settings.public_base_url.rstrip('/')}{request.url.path}"
+            if request.url.query:
+                validation_url = f"{validation_url}?{request.url.query}"
+
+        auth_tokens = [settings.twilio_auth_token]
+        if settings.twilio_secondary_auth_token.strip():
+            auth_tokens.append(settings.twilio_secondary_auth_token)
+
+        is_valid_signature = any(
+            is_valid_twilio_signature(
+                auth_token=auth_token,
+                request_url=validation_url,
+                form_data=form_data,
+                signature=signature,
+            )
+            for auth_token in auth_tokens
         )
         if not is_valid_signature:
-            logger.warning("Invalid Twilio signature blocked for request_id=%s", request.state.request_id)
+            logger.warning(
+                "Invalid Twilio signature blocked for request_id=%s url=%s token_count=%s",
+                request.state.request_id,
+                validation_url,
+                len(auth_tokens),
+            )
             request_logs.add(
                 {
                     "request_id": request.state.request_id,
