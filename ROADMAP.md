@@ -41,6 +41,9 @@ Build a personal WhatsApp-based assistant that stores and retrieves documents us
 ---
 
 ## Phase 1 - Core Data and Storage Layer
+### Status
+Partially completed
+
 ### Tasks
 - Define metadata schema:
   - document name
@@ -112,7 +115,7 @@ Completed (MVP baseline)
 
 ## Phase 5 - Send Document via WhatsApp
 ### Status
-Partially completed
+Completed (MVP)
 
 ### Tasks
 - On successful match, fetch file reference from storage
@@ -132,7 +135,7 @@ Partially completed
 
 ## Phase 6 - Logging, Reliability, and Hardening
 ### Status
-Partially completed
+Completed (MVP)
 
 ### Tasks
 - Log inbound message, parsed query, match result, outbound response
@@ -168,7 +171,7 @@ Completed (MVP utility)
 
 ## Phase 7 - Testing and Validation
 ### Status
-In progress
+Completed (MVP validation)
 
 ### Tasks
 - Test known queries: "send my resume", "give cv", "need my aadhaar"
@@ -184,10 +187,15 @@ In progress
 - Added pytest-based unit tests for matcher behavior.
 - Added pytest-based tests for repository add/deactivate flow.
 - Added API integration tests for setup status, upload/retrieve, and archive flows.
+- Added webhook and error-handling integration tests.
+- Total automated tests passing: 26.
 
 ---
 
 ## Phase 8 - Deployment (Prototype)
+### Status
+In progress
+
 ### Tasks
 - Deploy FastAPI to a public host
 - Set production webhook URL in Twilio sandbox
@@ -201,6 +209,25 @@ In progress
 - Added pre-created `.env` template for local setup.
 - Added helper scripts for start and setup checks.
 - Added `GET /setup/status` endpoint to verify Twilio/public URL readiness.
+- Live ngrok + Twilio sandbox end-to-end messaging validated.
+
+---
+
+## Phase 9 - MongoDB Metadata Backend
+### Status
+Starting now
+
+### Tasks
+- Add MongoDB configuration support in app settings.
+- Add MongoDB-based repository with the same CRUD interface.
+- Add repository selection toggle (JSON vs Mongo).
+- Keep local JSON fallback for reliability.
+- Add/update tests to validate selected backend behavior.
+
+### Deliverables
+- Working metadata persistence with MongoDB.
+- Backward-compatible local JSON mode.
+- Clear setup instructions for Mongo local/cloud usage.
 
 ---
 
@@ -222,4 +249,4 @@ In progress
 - Version history UI/dashboard
 
 ## Next Step for Future Session
-Finish live Twilio end-to-end test (ngrok + sandbox webhook + media send), then move metadata from local JSON to MongoDB/Firestore.
+Implement MongoDB metadata backend with config toggle and keep JSON as fallback; then deploy to stable host.
