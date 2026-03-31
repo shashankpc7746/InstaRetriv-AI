@@ -248,10 +248,83 @@ In progress
 
 ## Out of Scope for MVP (Future)
 - Multi-user authentication
-- LLM intent understanding
+- LLM intent understanding (planned for Phase 10)
 - Voice message support
-- Auto-tagging with AI
+- Auto-tagging with AI (planned for Phase 10)
+- Passcode security for sensitive documents (planned for Phase 11)
 - Version history UI/dashboard
 
+---
+
+## Phase 10 - LLM Auto-Tagging for Smart Classification
+### Status
+Not started (Planned for next session)
+
+### Description
+Integrate LLM (Claude API or open-source Ollama) to automatically analyze document content and generate relevant tags. This improves search accuracy and reduces manual tagging burden.
+
+### Tasks
+- Add LLM integration (Claude API or Ollama)
+- Create document analyzer service
+- On upload: analyze document content → extract document type
+- Auto-generate tags based on content (e.g., "PAN Card" → tags: "pan, tax, identification, govt-issued")
+- Update `/upload` endpoint to show auto-generated tags and allow user approval
+- Store confidence score with each auto-generated tag
+- Add manual override option
+
+### Deliverables
+- LLM-powered tagging service
+- Enhanced `/upload` endpoint with auto-tags preview
+- Test with various document types (resume, PAN, Aadhar, invoices, etc.)
+
+### Benefits
+- Faster document upload (no manual tagging)
+- Better search results (comprehensive auto-tags)
+- Automatic document classification
+- Improved user experience
+
+---
+
+## Phase 11 - Passcode Security for Sensitive Documents
+### Status
+Not started (Planned for next session)
+
+### Description
+Add optional passcode protection for sensitive personal documents. User can mark documents as "secured" and set a passcode. On WhatsApp request, the system will ask for the passcode before delivering the file. This prevents unauthorized access even if someone gains access to the WhatsApp account.
+
+### Tasks
+- Add `is_secured` and `passcode_hash` fields to DocumentMetadata schema
+- Create security service for passcode hashing and verification (bcrypt)
+- Update `/upload` endpoint to accept optional `is_secured` flag and `passcode`
+- Update `/webhook` to check if document is secured
+- If secured: instead of sending file, respond with "This is a secured document. Please enter the passcode."
+- Implement passcode verification logic (accept multiple attempts, add cooldown)
+- Store attempt logs for security audit
+- Add `/admin/security-logs` endpoint to view unauthorized access attempts
+- Update `/documents` endpoint to show security status
+
+### Deliverables
+- Passcode-protected document delivery
+- Security audit logs
+- User-friendly WhatsApp interaction for secured documents
+- Documentation on how to secure documents
+
+### Benefits
+- Protect sensitive personal documents (Passport, Bank Statements, etc.)
+- Two-factor security (possession of WhatsApp + passcode knowledge)
+- Audit trail for access attempts
+- User choice on which documents to secure
+- Peace of mind for personal data protection
+
+### Example Workflow
+1. User uploads Passport document → marks as "secured" with passcode "1234"
+2. User requests: "send my passport" via WhatsApp
+3. System responds: "This is a secured document. Please reply with the passcode."
+4. User replies: "1234"
+5. System verifies passcode → sends passport file
+6. If wrong passcode: "Incorrect passcode. Please try again. (Attempt 1/3)"
+
+---
+
 ## Next Step for Future Session
-Complete Mongo CRUD validation on live Mongo instance, then deploy to stable host.
+Complete Mongo CRUD validation on live Mongo instance, then deploy to stable host. After deployment, proceed with Phase 10 (LLM auto-tagging) for smarter document classification.

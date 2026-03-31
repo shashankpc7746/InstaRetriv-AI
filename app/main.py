@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
@@ -91,6 +91,98 @@ def health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name, "env": settings.app_env}
 
 
+@app.get("/")
+def upload_form():
+    """Simple HTML form to upload documents."""
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>InstaRetriv AI - Upload Documents</title>
+        <style>
+            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+            .container { background: #f5f5f5; padding: 30px; border-radius: 8px; }
+            h1 { color: #333; }
+            form { background: white; padding: 20px; border-radius: 8px; }
+            input, textarea { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+            button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+            button:hover { background: #0056b3; }
+            .info { background: #e7f3ff; padding: 15px; margin: 20px 0; border-radius: 4px; }
+            .section { margin: 30px 0; }
+            a { color: #007bff; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+            .link-list { background: white; padding: 15px; border-radius: 4px; margin: 10px 0; }
+            code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📄 InstaRetriv AI - Document Manager</h1>
+            
+            <div class="section">
+                <h2>Upload Document</h2>
+                <form method="post" action="/upload" enctype="multipart/form-data">
+                    <input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.webp">
+                    <input type="text" name="doc_category" placeholder="Category (e.g., resume, certificate)" required>
+                    <textarea name="tags" placeholder="Tags separated by commas (e.g., resume, pdf, work)" required></textarea>
+                    <button type="submit">Upload Document</button>
+                </form>
+            </div>
+
+            <div class="info">
+                <strong>📝 Tips:</strong>
+                <ul>
+                    <li>Use <strong>clear, descriptive tags</strong> for better search results</li>
+                    <li>Examples: "resume", "cover letter", "pan card", "aadhar", "invoice"</li>
+                    <li>Tags are case-insensitive and support partial matching</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>🔍 Admin Tools</h2>
+                <div class="link-list">
+                    <p><strong>View All Stored Documents:</strong></p>
+                    <a href="/admin/documents"><code>GET /admin/documents</code></a>
+                    <p style="margin-top: 10px; font-size: 14px;">See all documents in MongoDB with their tags and details</p>
+                </div>
+                
+                <div class="link-list">
+                    <p><strong>Test Search Query:</strong></p>
+                    <input type="text" id="searchQuery" placeholder="Enter search query (e.g., pan, resume)" value="Pan">
+                    <button onclick="testSearch()">Test Search</button>
+                    <p style="margin-top: 10px; font-size: 14px;">See if your document matches the search query</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>🤖 WhatsApp Integration</h2>
+                <div class="info">
+                    <p>Send a WhatsApp message to your Twilio Sandbox with a query like:</p>
+                    <ul>
+                        <li>"send my resume"</li>
+                        <li>"pan card"</li>
+                        <li>"aadhar certificate"</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        function testSearch() {
+            const query = document.getElementById('searchQuery').value;
+            if (!query.trim()) {
+                alert('Please enter a search query');
+                return;
+            }
+            window.location.href = '/admin/search?q=' + encodeURIComponent(query);
+        }
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+
 @app.get("/setup/status")
 def setup_status() -> dict[str, bool]:
     return {
@@ -102,6 +194,69 @@ def setup_status() -> dict[str, bool]:
         "mongodb_uri_set": bool(settings.mongodb_uri.strip()),
         "mongo_backend_selected": settings.use_mongo_metadata_backend,
     }
+
+
+@app.get("/admin/documents")
+def list_all_documents() -> dict:
+    """Debug endpoint: List all documents stored in MongoDB/JSON."""
+    try:
+        all_docs = repository.list_all()
+        return {
+            "total_count": len(all_docs),
+            "backend": "mongo" if settings.use_mongo_metadata_backend else "json",
+            "documents": [
+                {
+                    "id": doc.id,
+                    "file_name": doc.file_name,
+                    "doc_category": doc.doc_category,
+                    "tags": doc.tags,
+                    "is_active": doc.is_active,
+                }
+                for doc in all_docs
+            ],
+        }
+    except Exception as e:
+        logger.error("Error listing documents: %s", str(e))
+        raise HTTPException(status_code=500, detail=f"Error listing documents: {str(e)}")
+
+
+@app.get("/admin/search")
+def test_search(q: str = None) -> dict:
+    """Debug endpoint: Test search query against all documents."""
+    from app.services.matcher import find_best_document
+
+    if not q or not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required (e.g., /admin/search?q=pan)")
+
+    query = q.strip().lower()
+
+    try:
+        all_docs = repository.list_active()
+        result = find_best_document(query, all_docs)
+
+        return {
+            "query": query,
+            "found": result.found,
+            "total_documents_searched": len(all_docs),
+            "matched_document": {
+                "id": result.document.id,
+                "file_name": result.document.file_name,
+                "doc_category": result.document.doc_category,
+                "tags": result.document.tags,
+                "match_score": result.match_score,
+            } if result.document else None,
+            "all_documents": [
+                {
+                    "id": doc.id,
+                    "file_name": doc.file_name,
+                    "tags": doc.tags,
+                }
+                for doc in all_docs
+            ],
+        }
+    except Exception as e:
+        logger.error("Error searching documents: %s", str(e))
+        raise HTTPException(status_code=500, detail=f"Error searching documents: {str(e)}")
 
 
 @app.post("/upload", response_model=UploadResponse)
