@@ -215,7 +215,7 @@ In progress
 
 ## Phase 9 - MongoDB Metadata Backend
 ### Status
-Starting now
+In progress
 
 ### Tasks
 - Add MongoDB configuration support in app settings.
@@ -228,6 +228,11 @@ Starting now
 - Working metadata persistence with MongoDB.
 - Backward-compatible local JSON mode.
 - Clear setup instructions for Mongo local/cloud usage.
+
+### Implemented so far
+- Added MongoDB backend configuration keys in settings and .env template.
+- Added repository toggle support (json vs mongo).
+- Added safe fallback to JSON repository when Mongo is unavailable.
 
 ---
 
@@ -249,4 +254,4 @@ Starting now
 - Version history UI/dashboard
 
 ## Next Step for Future Session
-Implement MongoDB metadata backend with config toggle and keep JSON as fallback; then deploy to stable host.
+Complete Mongo CRUD validation on live Mongo instance, then deploy to stable host.

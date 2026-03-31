@@ -74,6 +74,28 @@ What is confirmed working end-to-end:
 - If ngrok URL changes, update both .env and Twilio sandbox webhook config.
 - For auth token rotation windows, optional secondary auth token is supported.
 
+## MongoDB Setup (New)
+
+1. Install runtime dependencies: pip install -r requirements.txt.
+2. Run MongoDB locally (or use MongoDB Atlas).
+3. Configure .env values:
+- METADATA_BACKEND=mongo
+- MONGODB_URI=<your_mongodb_connection_string>
+- MONGODB_DATABASE=instaretriv_ai
+- MONGODB_COLLECTION=documents
+4. Restart app: .\scripts\start_dev.ps1.
+5. Verify backend selection from setup endpoint:
+- GET /setup/status
+- Confirm mongo_backend_selected is true.
+
+## Daily Startup Checklist
+
+1. Start API: .\scripts\start_dev.ps1
+2. Start ngrok: ngrok http 8000
+3. Update PUBLIC_BASE_URL if ngrok URL changes.
+4. Update Twilio Sandbox webhook URL to <PUBLIC_BASE_URL>/webhook if URL changed.
+5. Send WhatsApp test message: send my resume.
+
 ## Upcoming Work
 
 - MongoDB metadata backend with feature toggle (JSON and Mongo modes).
