@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     metadata_file: str = "data/metadata.json"
     request_log_file: str = "data/request_logs.json"
 
+    metadata_backend: str = "json"
+    mongodb_uri: str = ""
+    mongodb_database: str = "instaretriv_ai"
+    mongodb_collection: str = "documents"
+
     allowed_extensions: str = "pdf,png,jpg,jpeg,webp,doc,docx"
 
     twilio_account_sid: str = ""
@@ -36,6 +41,10 @@ class Settings(BaseSettings):
         if not self.allowed_extensions.strip():
             return []
         return [item.strip().lower() for item in self.allowed_extensions.split(",") if item.strip()]
+
+    @property
+    def use_mongo_metadata_backend(self) -> bool:
+        return self.metadata_backend.strip().lower() == "mongo"
 
 
 settings = Settings()

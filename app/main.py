@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.config import settings
 from app.request_log_repository import RequestLogRepository
 from app.repository import MetadataRepository
+from app.repository_mongo import MongoMetadataRepository
 from app.schemas import DocumentMetadata, RetrievalResult, UploadResponse, WebhookResponse
 from app.services.matcher import find_best_document
 from app.services.storage import LocalStorageService
@@ -23,7 +24,25 @@ logger = logging.getLogger("instaretriv")
 
 app = FastAPI(title=settings.app_name)
 
-repository = MetadataRepository(settings.metadata_file)
+
+def create_metadata_repository():
+    if settings.use_mongo_metadata_backend:
+        if settings.mongodb_uri.strip():
+            try:
+                return MongoMetadataRepository(
+                    mongodb_uri=settings.mongodb_uri,
+                    database_name=settings.mongodb_database,
+                    collection_name=settings.mongodb_collection,
+                )
+            except Exception as exc:
+                logger.warning("Mongo backend init failed, falling back to JSON repository: %s", str(exc))
+        else:
+            logger.warning("Mongo backend selected but MONGODB_URI is empty; using JSON repository")
+
+    return MetadataRepository(settings.metadata_file)
+
+
+repository = create_metadata_repository()
 request_logs = RequestLogRepository(settings.request_log_file)
 storage_service = LocalStorageService(settings.upload_dir)
 whatsapp_sender = WhatsAppSender(
@@ -80,6 +99,8 @@ def setup_status() -> dict[str, bool]:
         "twilio_whatsapp_from_set": bool(settings.twilio_whatsapp_from.strip()),
         "public_base_url_set": bool(settings.public_base_url.strip()),
         "require_twilio_signature": settings.require_twilio_signature,
+        "mongodb_uri_set": bool(settings.mongodb_uri.strip()),
+        "mongo_backend_selected": settings.use_mongo_metadata_backend,
     }
 
 
