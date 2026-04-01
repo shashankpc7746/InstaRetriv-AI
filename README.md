@@ -88,6 +88,27 @@ What is confirmed working end-to-end:
 - GET /setup/status
 - Confirm mongo_backend_selected is true.
 
+## Deploy to Render
+
+1. Push latest code to GitHub.
+2. In Render dashboard, click New + -> Blueprint.
+3. Select this repository and deploy using render.yaml.
+4. In Render service environment variables, set:
+- TWILIO_ACCOUNT_SID
+- TWILIO_AUTH_TOKEN
+- TWILIO_SECONDARY_AUTH_TOKEN (optional)
+- TWILIO_WHATSAPP_FROM
+- PUBLIC_BASE_URL (your Render app URL)
+- AUTHORIZED_SENDERS
+- MONGODB_URI
+5. After deploy is live, open /setup/status and verify:
+- mongo_backend_selected = true
+- public_base_url_set = true
+
+Twilio final step:
+- Set Twilio Sandbox webhook to https://<your-render-domain>/webhook
+- Keep method POST
+
 ## Daily Startup Checklist
 
 1. Start API: .\scripts\start_dev.ps1
@@ -100,7 +121,8 @@ What is confirmed working end-to-end:
 
 - MongoDB metadata backend with feature toggle (JSON and Mongo modes).
 - Data migration utility from local metadata JSON to MongoDB.
-- Deployment to stable host (Render/Railway/VPS).
+- LLM-based auto-tagging and document type classification.
+- Passcode protection flow for sensitive documents on WhatsApp retrieval.
 - Production environment hardening and secrets management.
 
 ## Future Enhancements
