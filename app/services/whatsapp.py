@@ -11,9 +11,18 @@ logger = logging.getLogger("instaretriv.whatsapp")
 class WhatsAppSender:
     def __init__(self, account_sid: str, auth_token: str, sender: str, retries: int = 2) -> None:
         self._enabled = bool(account_sid and auth_token and sender)
-        self._sender = sender
+        self._sender = self._normalize_whatsapp_number(sender)
         self._retries = max(0, retries)
         self._client = Client(account_sid, auth_token) if self._enabled else None
+
+    @staticmethod
+    def _normalize_whatsapp_number(number: str) -> str:
+        value = (number or "").strip()
+        if not value:
+            return value
+        if value.lower().startswith("whatsapp:"):
+            return f"whatsapp:{value.split(':', 1)[1].strip()}"
+        return f"whatsapp:{value}"
 
     @property
     def enabled(self) -> bool:
@@ -29,12 +38,14 @@ class WhatsAppSender:
         if not self._enabled or self._client is None:
             return None
 
+        normalized_to = self._normalize_whatsapp_number(to_number)
+
         total_attempts = self._retries + 1
         for attempt in range(1, total_attempts + 1):
             try:
                 kwargs = {
                     "from_": self._sender,
-                    "to": to_number,
+                    "to": normalized_to,
                     "body": body,
                 }
                 if media_url:
