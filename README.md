@@ -1,42 +1,64 @@
 # InstaRetriv AI
 
-InstaRetriv AI is a personal WhatsApp document retrieval assistant built with FastAPI and Twilio Sandbox.
-Send a message like "send my resume" and receive the matched file directly on WhatsApp.
+InstaRetriv AI is a WhatsApp-first document retrieval system that lets you upload files once and fetch them instantly using natural language messages.
 
-## Current Version
+Example query:
+Send my Aadhaar card
 
-Checkpoint: v0
+Result:
+The system finds the best matching document and delivers it directly through WhatsApp.
 
-What is confirmed working end-to-end:
-- Document upload via API.
-- Query-based document retrieval.
-- WhatsApp webhook processing.
-- Twilio media send flow.
-- Signature validation support.
-- Request logging and trace IDs.
+## Project Status
 
-## Core Features
+Production deployment is live on Render with:
+- FastAPI backend running continuously
+- Twilio webhook integration active
+- MongoDB Atlas metadata backend connected
+- End-to-end retrieval and media delivery verified
 
-- Single-user WhatsApp assistant flow.
-- Upload endpoint with extension and tag validation.
-- Keyword, synonym, and fuzzy retrieval matching.
-- Twilio outbound text/media send with retries.
-- File serving endpoint for Twilio media fetch.
-- Soft archive support for documents.
-- Health and setup readiness endpoints.
-- Structured request logging with X-Request-ID tracing.
+## Why InstaRetriv AI
+
+- WhatsApp-native retrieval experience
+- Fast and practical for personal document workflows
+- Strongly typed backend with clean service boundaries
+- Secure webhook validation and sender restrictions
+- Designed for easy evolution into AI-powered retrieval
+
+## Key Features
+
+- Upload document files with category and tags
+- Retrieval by natural language text queries
+- Matching engine with keywords, synonyms, and fuzzy scoring
+- Twilio inbound webhook processing
+- Outbound WhatsApp text and media with retry logic
+- Document serving endpoint for Twilio media fetch
+- Soft-archive document lifecycle
+- Structured request tracing with request IDs
+- Persistent request logs for debugging
+
+## Architecture
+
+- API Layer: FastAPI
+- Messaging Layer: Twilio WhatsApp Sandbox
+- Metadata Layer: MongoDB Atlas (with JSON fallback strategy)
+- Storage Layer: Local file storage (current)
+- Matching Layer: Token + synonym + fuzzy ranking
+- Observability: Request logs + health and setup status endpoints
 
 ## Tech Stack
 
-- Backend: FastAPI
-- WhatsApp API: Twilio Sandbox
-- Metadata storage (current): local JSON
-- File storage (current): local filesystem
-- Matching: token + synonym + fuzzy scoring
-- Tests: pytest + FastAPI TestClient
+- Python
+- FastAPI
+- Uvicorn
+- Pydantic Settings
+- Twilio SDK
+- PyMongo
+- RapidFuzz
+- Pytest
 
-## API Endpoints
+## API Surface
 
+- GET /
 - GET /health
 - GET /setup/status
 - POST /upload
@@ -46,91 +68,116 @@ What is confirmed working end-to-end:
 - GET /documents
 - DELETE /documents/{document_id}
 - GET /logs/recent
+- GET /admin/documents
+- GET /admin/search
 
-## Quick Start
+## Local Setup
 
 1. Create and activate virtual environment.
-2. Install dependencies from requirements files.
-3. Configure .env from .env.example.
-4. Start app: python run.py or .\scripts\start_dev.ps1.
-5. Open API docs at http://127.0.0.1:8000/docs.
+2. Install runtime dependencies.
+3. Create .env from .env.example.
+4. Start server.
+5. Open API docs.
 
-### Dev Helpers
+Commands:
 
-- .\scripts\start_dev.ps1
-- .\scripts\start_dev.ps1 -Reload
-- .\scripts\check_setup.ps1
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python run.py
+```
 
-### Run Tests
+API docs:
 
-1. Install test dependencies from requirements-dev.txt.
-2. Run: python -m pytest -q
-3. Current test status: 26 passing.
+```text
+http://127.0.0.1:8000/docs
+```
 
-## Twilio Notes
+## Environment Configuration
 
-- Keep PUBLIC_BASE_URL and Twilio webhook URL aligned.
-- Keep webhook URL as HTTPS.
-- If ngrok URL changes, update both .env and Twilio sandbox webhook config.
-- For auth token rotation windows, optional secondary auth token is supported.
+Core keys:
+- APP_ENV
+- HOST
+- PORT
+- AUTHORIZED_SENDERS
+- PUBLIC_BASE_URL
 
-## MongoDB Setup (New)
-
-1. Install runtime dependencies: pip install -r requirements.txt.
-2. Run MongoDB locally (or use MongoDB Atlas).
-3. Configure .env values:
-- METADATA_BACKEND=mongo
-- MONGODB_URI=<your_mongodb_connection_string>
-- MONGODB_DATABASE=instaretriv_ai
-- MONGODB_COLLECTION=documents
-4. Restart app: .\scripts\start_dev.ps1.
-5. Verify backend selection from setup endpoint:
-- GET /setup/status
-- Confirm mongo_backend_selected is true.
-
-## Deploy to Render
-
-1. Push latest code to GitHub.
-2. In Render dashboard, click New + -> Blueprint.
-3. Select this repository and deploy using render.yaml.
-4. In Render service environment variables, set:
+Twilio keys:
 - TWILIO_ACCOUNT_SID
 - TWILIO_AUTH_TOKEN
 - TWILIO_SECONDARY_AUTH_TOKEN (optional)
 - TWILIO_WHATSAPP_FROM
-- PUBLIC_BASE_URL (your Render app URL)
-- AUTHORIZED_SENDERS
+- REQUIRE_TWILIO_SIGNATURE
+
+Metadata backend keys:
+- METADATA_BACKEND (json or mongo)
 - MONGODB_URI
-5. After deploy is live, open /setup/status and verify:
+- MONGODB_DATABASE
+- MONGODB_COLLECTION
+
+## MongoDB Setup
+
+1. Create MongoDB Atlas cluster.
+2. Create DB user credentials.
+3. Allow network access from your deployment environment.
+4. Set MONGODB_URI in environment variables.
+5. Set METADATA_BACKEND=mongo.
+6. Verify setup using GET /setup/status.
+
+Success indicator:
+- mongodb_uri_set = true
 - mongo_backend_selected = true
-- public_base_url_set = true
 
-Twilio final step:
-- Set Twilio Sandbox webhook to https://<your-render-domain>/webhook
-- Keep method POST
+## Render Deployment
 
-## Daily Startup Checklist
+This repository includes deployment files:
+- render.yaml
+- Procfile
+- runtime.txt
 
-1. Start API: .\scripts\start_dev.ps1
-2. Start ngrok: ngrok http 8000
-3. Update PUBLIC_BASE_URL if ngrok URL changes.
-4. Update Twilio Sandbox webhook URL to <PUBLIC_BASE_URL>/webhook if URL changed.
-5. Send WhatsApp test message: send my resume.
+Deploy flow:
+1. Push code to GitHub.
+2. Create Render web service from the repository.
+3. Apply required environment variables in Render.
+4. Confirm service health on /health.
+5. Confirm readiness on /setup/status.
+6. Point Twilio Sandbox webhook to:
 
-## Upcoming Work
+```text
+https://<your-render-domain>/webhook
+```
 
-- MongoDB metadata backend with feature toggle (JSON and Mongo modes).
-- Data migration utility from local metadata JSON to MongoDB.
-- LLM-based auto-tagging and document type classification.
-- Passcode protection flow for sensitive documents on WhatsApp retrieval.
-- Production environment hardening and secrets management.
+Note:
+- Set PUBLIC_BASE_URL to base domain only, not /webhook.
 
-## Future Enhancements
+## Testing
 
-- Cloud file storage (S3/Firebase Storage).
-- Better ranking controls and retrieval analytics.
-- Multi-user access model.
-- Role-based authentication and admin controls.
-- AI-assisted tagging and semantic retrieval.
-- Dashboard for upload/search/log monitoring.
-- Version history and document revisions.
+Run automated tests:
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+## Operational Notes
+
+- Keep Twilio webhook URL and PUBLIC_BASE_URL aligned.
+- Rotate Twilio and MongoDB secrets after public sharing.
+- Sandbox behavior can vary; always confirm active participant status.
+- Current file storage is local to service runtime. For strict durability, move file binaries to cloud storage.
+
+## Completed Milestones
+
+- Initial MVP pipeline complete
+- Twilio signature validation hardened for public URL deployment
+- MongoDB backend integrated with compatibility fallback
+- Render deployment completed
+- End-to-end WhatsApp media delivery validated in production
+
+## Coming Soon
+
+- Intelligence Layer: auto-tagging engine that understands document context before storage
+- Secure Vault Mode: extra verification path for personal-sensitive files
+- Retrieval Brain v2: intent-aware ranking that adapts to your query style over time
+- Control Hub: compact command center for analytics, document health, and smart actions
