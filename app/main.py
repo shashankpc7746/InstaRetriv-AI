@@ -475,6 +475,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
     if result.found and result.document is not None:
         message = f"Document found: {result.document.file_name}."
         message_sid = None
+        requires_link_fallback = result.document.file_type.lower() in {"pdf", "doc", "docx"}
 
         if not is_remote_storage_path(result.document.storage_path):
             file_path = Path(result.document.storage_path)
@@ -517,8 +518,18 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 media_url=media_url,
             )
             if message_sid:
+                if requires_link_fallback:
+                    whatsapp_sender.send_text(
+                        to_number=sender,
+                        body=f"Direct download link (if preview fails): {media_url}",
+                    )
                 message = "Document found and sent to your WhatsApp."
             else:
+                if requires_link_fallback:
+                    whatsapp_sender.send_text(
+                        to_number=sender,
+                        body=f"Media preview failed. Open your document here: {media_url}",
+                    )
                 message = "Document found but delivery failed. Please retry in a moment."
         elif whatsapp_sender.enabled:
             message_sid = whatsapp_sender.send_text(
