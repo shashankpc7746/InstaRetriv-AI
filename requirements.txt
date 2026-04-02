@@ -5,3 +5,4 @@ pydantic-settings==2.8.1
 rapidfuzz==3.12.2
 twilio==9.5.1
 pymongo==4.10.1
+cloudinary==1.41.0

@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     authorized_senders: str = ""
 
     upload_dir: str = "uploads"
+    storage_backend: str = "local"
+    cloudinary_cloud_name: str = ""
+    cloudinary_api_key: str = ""
+    cloudinary_api_secret: str = ""
     metadata_file: str = "data/metadata.json"
     request_log_file: str = "data/request_logs.json"
 
@@ -45,6 +49,18 @@ class Settings(BaseSettings):
     @property
     def use_mongo_metadata_backend(self) -> bool:
         return self.metadata_backend.strip().lower() == "mongo"
+
+    @property
+    def use_cloudinary_storage_backend(self) -> bool:
+        return self.storage_backend.strip().lower() == "cloudinary"
+
+    @property
+    def cloudinary_configured(self) -> bool:
+        return bool(
+            self.cloudinary_cloud_name.strip()
+            and self.cloudinary_api_key.strip()
+            and self.cloudinary_api_secret.strip()
+        )
 
 
 settings = Settings()
