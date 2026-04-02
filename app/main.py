@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
@@ -12,7 +12,7 @@ from app.repository import MetadataRepository
 from app.repository_mongo import MongoMetadataRepository
 from app.schemas import DocumentMetadata, RetrievalResult, UploadResponse, WebhookResponse
 from app.services.matcher import find_best_document
-from app.services.storage import LocalStorageService
+from app.services.storage import CloudinaryStorageService, LocalStorageService, is_remote_storage_path
 from app.services.twilio_validation import is_valid_twilio_signature
 from app.services.whatsapp import WhatsAppSender
 
@@ -44,7 +44,25 @@ def create_metadata_repository():
 
 repository = create_metadata_repository()
 request_logs = RequestLogRepository(settings.request_log_file)
-storage_service = LocalStorageService(settings.upload_dir)
+
+
+def create_storage_service():
+    if settings.use_cloudinary_storage_backend:
+        if settings.cloudinary_configured:
+            try:
+                return CloudinaryStorageService(
+                    cloud_name=settings.cloudinary_cloud_name,
+                    api_key=settings.cloudinary_api_key,
+                    api_secret=settings.cloudinary_api_secret,
+                )
+            except Exception as exc:
+                logger.warning("Cloudinary init failed, falling back to local storage: %s", str(exc))
+        else:
+            logger.warning("Cloudinary backend selected but credentials are missing; using local storage")
+    return LocalStorageService(settings.upload_dir)
+
+
+storage_service = create_storage_service()
 whatsapp_sender = WhatsAppSender(
     account_sid=settings.twilio_account_sid,
     auth_token=settings.twilio_auth_token,
@@ -193,6 +211,8 @@ def setup_status() -> dict[str, bool]:
         "require_twilio_signature": settings.require_twilio_signature,
         "mongodb_uri_set": bool(settings.mongodb_uri.strip()),
         "mongo_backend_selected": settings.use_mongo_metadata_backend,
+        "cloudinary_configured": settings.cloudinary_configured,
+        "cloudinary_backend_selected": settings.use_cloudinary_storage_backend,
     }
 
 
@@ -351,6 +371,9 @@ def serve_document_file(document_id: str):
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    if is_remote_storage_path(document.storage_path):
+        return RedirectResponse(url=document.storage_path)
+
     file_path = Path(document.storage_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Stored file missing")
@@ -425,8 +448,12 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         message = f"Document found: {result.document.file_name}."
         message_sid = None
 
-        file_path = Path(result.document.storage_path)
-        if not file_path.exists():
+        if not is_remote_storage_path(result.document.storage_path):
+            file_path = Path(result.document.storage_path)
+        else:
+            file_path = None
+
+        if file_path is not None and not file_path.exists():
             # Render local disk is ephemeral; metadata can outlive file binaries across restarts.
             repository.deactivate(result.document.id)
             stale_message = (
@@ -457,7 +484,10 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             return WebhookResponse(message="Stored file missing. Please re-upload your document.")
 
         if whatsapp_sender.enabled and settings.public_base_url.strip():
-            media_url = f"{settings.public_base_url.rstrip('/')}/files/{result.document.id}"
+            if is_remote_storage_path(result.document.storage_path):
+                media_url = result.document.storage_path
+            else:
+                media_url = f"{settings.public_base_url.rstrip('/')}/files/{result.document.id}"
             message_sid = whatsapp_sender.send_media(
                 to_number=sender,
                 body=f"Sharing: {result.document.file_name}",
