@@ -552,11 +552,6 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 media_url=media_url,
             )
             if message_sid:
-                if requires_link_fallback:
-                    whatsapp_sender.send_text(
-                        to_number=sender,
-                        body=f"Direct download link (if preview fails): {media_url}",
-                    )
                 message = "Document found and sent to your WhatsApp."
             else:
                 if requires_link_fallback:
