@@ -12,6 +12,8 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0
+      - key: STORAGE_BACKEND
+        value: cloudinary
       - key: METADATA_BACKEND
         value: mongo
       - key: MONGODB_DATABASE
@@ -33,4 +35,10 @@ services:
       - key: AUTHORIZED_SENDERS
         sync: false
       - key: MONGODB_URI
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
         sync: false

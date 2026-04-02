@@ -116,6 +116,12 @@ Metadata backend keys:
 - MONGODB_DATABASE
 - MONGODB_COLLECTION
 
+Storage backend keys:
+- STORAGE_BACKEND (local or cloudinary)
+- CLOUDINARY_CLOUD_NAME
+- CLOUDINARY_API_KEY
+- CLOUDINARY_API_SECRET
+
 ## MongoDB Setup
 
 1. Create MongoDB Atlas cluster.
@@ -151,6 +157,26 @@ https://<your-render-domain>/webhook
 Note:
 - Set PUBLIC_BASE_URL to base domain only, not /webhook.
 
+## Cloudinary Durable Storage Setup
+
+Use this to keep uploaded files available even after Render restarts/redeploys.
+
+1. Create a Cloudinary account.
+2. Copy these values from Cloudinary dashboard:
+- CLOUDINARY_CLOUD_NAME
+- CLOUDINARY_API_KEY
+- CLOUDINARY_API_SECRET
+3. In Render environment variables set:
+- STORAGE_BACKEND=cloudinary
+- CLOUDINARY_CLOUD_NAME=<value>
+- CLOUDINARY_API_KEY=<value>
+- CLOUDINARY_API_SECRET=<value>
+4. Redeploy service.
+5. Upload a new document and test retrieval from WhatsApp.
+
+Free tier:
+- Yes, Cloudinary free plan is enough to start MVP/testing.
+
 ## Testing
 
 Run automated tests:
@@ -165,7 +191,8 @@ python -m pytest -q
 - Keep Twilio webhook URL and PUBLIC_BASE_URL aligned.
 - Rotate Twilio and MongoDB secrets after public sharing.
 - Sandbox behavior can vary; always confirm active participant status.
-- Current file storage is local to service runtime. For strict durability, move file binaries to cloud storage.
+- If STORAGE_BACKEND=local, files can disappear after redeploy.
+- If STORAGE_BACKEND=cloudinary, files remain durable across redeploys.
 
 ## Completed Milestones
 
