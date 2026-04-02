@@ -49,11 +49,19 @@ class CloudinaryStorageService:
         if not data:
             raise RuntimeError("empty file payload")
 
+        file_name = upload_file.filename or "document"
+        file_suffix = Path(file_name).suffix.lower()
+        image_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+        resource_type = "image" if file_suffix in image_suffixes else "raw"
+        public_id = f"instaretriv/{uuid4()}"
+
         upload_result = cloudinary.uploader.upload(
             data,
-            resource_type="auto",
-            public_id=f"instaretriv/{uuid4()}",
-            filename=upload_file.filename,
+            resource_type=resource_type,
+            type="upload",
+            access_mode="public",
+            public_id=public_id,
+            filename=file_name,
             use_filename=False,
             unique_filename=False,
             overwrite=False,

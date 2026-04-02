@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
+import requests
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -98,6 +99,16 @@ def _resolve_best_retrievable_document(query: str) -> tuple[RetrievalResult, int
         candidates = [doc for doc in candidates if doc.id != result.document.id]
 
     return RetrievalResult(found=False, score=0.0), stale_count
+
+
+def _is_remote_file_accessible(url: str) -> bool:
+    try:
+        response = requests.get(url, stream=True, timeout=8)
+        status_code = response.status_code
+        response.close()
+        return status_code < 400
+    except Exception:
+        return False
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -512,6 +523,29 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 media_url = result.document.storage_path
             else:
                 media_url = f"{settings.public_base_url.rstrip('/')}/files/{result.document.id}"
+
+            if is_remote_storage_path(media_url) and not _is_remote_file_accessible(media_url):
+                repository.deactivate(result.document.id)
+                explain_msg = (
+                    f"I found {result.document.file_name}, but its cloud link is not publicly accessible yet. "
+                    "Please re-upload the file and ensure Cloudinary public delivery for documents is enabled."
+                )
+                if whatsapp_sender.enabled:
+                    message_sid = whatsapp_sender.send_text(to_number=sender, body=explain_msg)
+                request_logs.add(
+                    {
+                        "request_id": request.state.request_id,
+                        "type": "webhook",
+                        "sender": sender,
+                        "query": body,
+                        "found": False,
+                        "doc_id": result.document.id,
+                        "twilio_sid": message_sid,
+                        "error": "remote-file-not-accessible",
+                    }
+                )
+                return WebhookResponse(message="Cloud file link is not accessible. Please re-upload the document.")
+
             message_sid = whatsapp_sender.send_media(
                 to_number=sender,
                 body=f"Sharing: {result.document.file_name}",
