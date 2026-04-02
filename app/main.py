@@ -425,6 +425,37 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         message = f"Document found: {result.document.file_name}."
         message_sid = None
 
+        file_path = Path(result.document.storage_path)
+        if not file_path.exists():
+            # Render local disk is ephemeral; metadata can outlive file binaries across restarts.
+            repository.deactivate(result.document.id)
+            stale_message = (
+                f"I found metadata for {result.document.file_name}, but the stored file is no longer available. "
+                "Please re-upload this document."
+            )
+            if whatsapp_sender.enabled:
+                message_sid = whatsapp_sender.send_text(to_number=sender, body=stale_message)
+
+            logger.warning(
+                "Webhook matched stale document metadata: sender=%s query=%s doc_id=%s",
+                sender,
+                body,
+                result.document.id,
+            )
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "webhook",
+                    "sender": sender,
+                    "query": body,
+                    "found": False,
+                    "doc_id": result.document.id,
+                    "twilio_sid": message_sid,
+                    "error": "stored-file-missing",
+                }
+            )
+            return WebhookResponse(message="Stored file missing. Please re-upload your document.")
+
         if whatsapp_sender.enabled and settings.public_base_url.strip():
             media_url = f"{settings.public_base_url.rstrip('/')}/files/{result.document.id}"
             message_sid = whatsapp_sender.send_media(
