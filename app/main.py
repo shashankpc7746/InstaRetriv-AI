@@ -71,6 +71,35 @@ whatsapp_sender = WhatsAppSender(
 )
 
 
+def _resolve_best_retrievable_document(query: str) -> tuple[RetrievalResult, int]:
+    """Find the best match while skipping stale local-file records."""
+    candidates = repository.list_active()
+    stale_count = 0
+
+    while candidates:
+        result = find_best_document(query, candidates)
+        if not result.found or result.document is None:
+            return RetrievalResult(found=False, score=0.0), stale_count
+
+        if is_remote_storage_path(result.document.storage_path):
+            return result, stale_count
+
+        file_path = Path(result.document.storage_path)
+        if file_path.exists():
+            return result, stale_count
+
+        repository.deactivate(result.document.id)
+        stale_count += 1
+        logger.warning(
+            "Auto-archived stale metadata during match resolution: query=%s doc_id=%s",
+            query,
+            result.document.id,
+        )
+        candidates = [doc for doc in candidates if doc.id != result.document.id]
+
+    return RetrievalResult(found=False, score=0.0), stale_count
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = str(uuid4())
@@ -323,8 +352,7 @@ async def upload_document(
 
 @app.get("/get-document", response_model=RetrievalResult)
 def get_document(query: str, request: Request) -> RetrievalResult:
-    documents = repository.list_active()
-    result = find_best_document(query, documents)
+    result, _stale_count = _resolve_best_retrievable_document(query)
     logger.info(
         "Retrieval query processed: query=%s found=%s score=%.2f",
         query,
@@ -442,7 +470,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         logger.warning("Unauthorized sender blocked: %s", sender)
         return WebhookResponse(message="Unauthorized sender.")
 
-    result = find_best_document(body, repository.list_active())
+    result, stale_count = _resolve_best_retrievable_document(body)
 
     if result.found and result.document is not None:
         message = f"Document found: {result.document.file_name}."
@@ -454,21 +482,16 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             file_path = None
 
         if file_path is not None and not file_path.exists():
-            # Render local disk is ephemeral; metadata can outlive file binaries across restarts.
+            # This should rarely happen because stale items are filtered earlier.
             repository.deactivate(result.document.id)
-            stale_message = (
-                f"I found metadata for {result.document.file_name}, but the stored file is no longer available. "
-                "Please re-upload this document."
-            )
             if whatsapp_sender.enabled:
-                message_sid = whatsapp_sender.send_text(to_number=sender, body=stale_message)
-
-            logger.warning(
-                "Webhook matched stale document metadata: sender=%s query=%s doc_id=%s",
-                sender,
-                body,
-                result.document.id,
-            )
+                message_sid = whatsapp_sender.send_text(
+                    to_number=sender,
+                    body=(
+                        f"I found metadata for {result.document.file_name}, but the stored file is no longer available. "
+                        "Please re-upload this document."
+                    ),
+                )
             request_logs.add(
                 {
                     "request_id": request.state.request_id,
@@ -478,7 +501,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "found": False,
                     "doc_id": result.document.id,
                     "twilio_sid": message_sid,
-                    "error": "stored-file-missing",
+                    "error": "stored-file-missing-late-check",
                 }
             )
             return WebhookResponse(message="Stored file missing. Please re-upload your document.")
@@ -528,6 +551,36 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             message=message,
             matched_document_id=result.document.id,
         )
+
+    if stale_count > 0:
+        info_message = (
+            "I found older entries for this request, but those files are no longer available. "
+            "Please re-upload that document."
+        )
+        message_sid = None
+        if whatsapp_sender.enabled:
+            message_sid = whatsapp_sender.send_text(to_number=sender, body=info_message)
+
+        logger.info(
+            "Webhook no retrievable document after skipping stale entries: sender=%s query=%s stale_count=%s",
+            sender,
+            body,
+            stale_count,
+        )
+        request_logs.add(
+            {
+                "request_id": request.state.request_id,
+                "type": "webhook",
+                "sender": sender,
+                "query": body,
+                "found": False,
+                "doc_id": None,
+                "twilio_sid": message_sid,
+                "error": "no-retrievable-document-stale-only",
+                "stale_count": stale_count,
+            }
+        )
+        return WebhookResponse(message="Stored files were missing. Please re-upload your document.")
 
     logger.info("Webhook no document match: sender=%s query=%s", sender, body)
     request_logs.add(
