@@ -1,59 +1,71 @@
 # InstaRetriv AI
 
-InstaRetriv AI is a WhatsApp-first document retrieval system that lets you upload files once and fetch them instantly using natural language messages.
+InstaRetriv AI is a production-ready WhatsApp document assistant that stores your files, understands natural-language queries, and returns the right document through Twilio with minimal friction.
 
-Example query:
-Send my Aadhaar card
+Example:
+Send my resume
 
 Result:
-The system finds the best matching document and delivers it directly through WhatsApp.
+The assistant finds the best match and delivers the file to WhatsApp, with durable cloud storage and fallback behavior for edge cases.
+
+## Version
+
+v2.0
+
+What v2.0 achieved after v1.0:
+- Production deployment on Render
+- MongoDB Atlas metadata persistence
+- Cloudinary-backed durable file storage
+- Safer retrieval flow with stale-file skipping
+- WhatsApp delivery fallback handling
 
 ## Project Status
 
-Production deployment is live on Render with:
-- FastAPI backend running continuously
-- Twilio webhook integration active
-- MongoDB Atlas metadata backend connected
-- End-to-end retrieval and media delivery verified
+The system is live and operational with:
+- FastAPI backend deployed on Render
+- Twilio WhatsApp Sandbox integration
+- MongoDB Atlas for document metadata
+- Cloudinary for durable file delivery
+- Automated health and setup checks
 
-## Why InstaRetriv AI
+## Why This Project Matters
 
-- WhatsApp-native retrieval experience
-- Fast and practical for personal document workflows
-- Strongly typed backend with clean service boundaries
-- Secure webhook validation and sender restrictions
-- Designed for easy evolution into AI-powered retrieval
+- It turns WhatsApp into a practical personal document vault.
+- It removes the need to manually search folders and chat histories.
+- It is built for real usage, not just a demo flow.
+- It already handles the painful parts: webhooks, retries, storage durability, and stale-data cleanup.
 
-## Key Features
+## What It Can Do
 
-- Upload document files with category and tags
-- Retrieval by natural language text queries
-- Matching engine with keywords, synonyms, and fuzzy scoring
-- Twilio inbound webhook processing
-- Outbound WhatsApp text and media with retry logic
-- Document serving endpoint for Twilio media fetch
-- Soft-archive document lifecycle
-- Structured request tracing with request IDs
-- Persistent request logs for debugging
+- Upload files with categories and tags
+- Retrieve documents using conversational queries
+- Match by keywords, synonyms, and fuzzy scoring
+- Deliver files through WhatsApp
+- Fall back to a direct file link when media delivery fails
+- Store metadata in MongoDB
+- Store files in Cloudinary so they survive redeploys
+- Auto-skip stale file records and keep retrieval moving
+- Log requests with trace IDs for debugging
 
-## Architecture
+## Architecture Overview
 
-- API Layer: FastAPI
-- Messaging Layer: Twilio WhatsApp Sandbox
-- Metadata Layer: MongoDB Atlas (with JSON fallback strategy)
-- Storage Layer: Local file storage (current)
-- Matching Layer: Token + synonym + fuzzy ranking
-- Observability: Request logs + health and setup status endpoints
+- API: FastAPI
+- Messaging: Twilio WhatsApp Sandbox
+- Metadata: MongoDB Atlas
+- File storage: Cloudinary
+- Retrieval: keyword + synonym + fuzzy matching
+- Observability: request logs, health checks, setup status endpoint
 
 ## Tech Stack
 
 - Python
 - FastAPI
 - Uvicorn
-- Pydantic Settings
 - Twilio SDK
 - PyMongo
+- Cloudinary SDK
 - RapidFuzz
+- Pydantic Settings
 - Pytest
 
 ## API Surface
@@ -73,13 +85,11 @@ Production deployment is live on Render with:
 
 ## Local Setup
 
-1. Create and activate virtual environment.
+1. Create and activate a virtual environment.
 2. Install runtime dependencies.
-3. Create .env from .env.example.
-4. Start server.
-5. Open API docs.
-
-Commands:
+3. Configure [.env](.env) from [.env.example](.env.example).
+4. Start the app locally.
+5. Open the docs UI.
 
 ```powershell
 python -m venv .venv
@@ -88,98 +98,104 @@ pip install -r requirements.txt
 python run.py
 ```
 
-API docs:
+Docs:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-## Environment Configuration
+## Required Environment Variables
 
-Core keys:
+Application:
 - APP_ENV
 - HOST
 - PORT
 - AUTHORIZED_SENDERS
 - PUBLIC_BASE_URL
 
-Twilio keys:
+Twilio:
 - TWILIO_ACCOUNT_SID
 - TWILIO_AUTH_TOKEN
-- TWILIO_SECONDARY_AUTH_TOKEN (optional)
+- TWILIO_SECONDARY_AUTH_TOKEN
 - TWILIO_WHATSAPP_FROM
 - REQUIRE_TWILIO_SIGNATURE
 
-Metadata backend keys:
-- METADATA_BACKEND (json or mongo)
+Metadata:
+- METADATA_BACKEND
 - MONGODB_URI
 - MONGODB_DATABASE
 - MONGODB_COLLECTION
 
-Storage backend keys:
-- STORAGE_BACKEND (local or cloudinary)
+Storage:
+- STORAGE_BACKEND
 - CLOUDINARY_CLOUD_NAME
 - CLOUDINARY_API_KEY
 - CLOUDINARY_API_SECRET
 
-## MongoDB Setup
+## Deployment
 
-1. Create MongoDB Atlas cluster.
-2. Create DB user credentials.
-3. Allow network access from your deployment environment.
-4. Set MONGODB_URI in environment variables.
-5. Set METADATA_BACKEND=mongo.
-6. Verify setup using GET /setup/status.
-
-Success indicator:
-- mongodb_uri_set = true
-- mongo_backend_selected = true
-
-## Render Deployment
-
-This repository includes deployment files:
+This repo includes Render deployment files:
 - render.yaml
 - Procfile
 - runtime.txt
 
-Deploy flow:
-1. Push code to GitHub.
-2. Create Render web service from the repository.
-3. Apply required environment variables in Render.
-4. Confirm service health on /health.
-5. Confirm readiness on /setup/status.
-6. Point Twilio Sandbox webhook to:
+Deploy steps:
+1. Push the latest code to GitHub.
+2. Create or update the Render web service.
+3. Set environment variables in Render.
+4. Redeploy the service.
+5. Confirm `/health` and `/setup/status` both work.
+6. Point Twilio Sandbox webhook to the Render URL.
+
+Webhook URL:
 
 ```text
 https://<your-render-domain>/webhook
 ```
 
-Note:
-- Set PUBLIC_BASE_URL to base domain only, not /webhook.
+Important:
+- Use the base domain in `PUBLIC_BASE_URL`.
+- Keep secret values out of git; enter them directly in Render.
 
-## Cloudinary Durable Storage Setup
+## MongoDB Setup
 
-Use this to keep uploaded files available even after Render restarts/redeploys.
+MongoDB is used for metadata only.
 
+Steps:
+1. Create the MongoDB Atlas cluster.
+2. Create a database user.
+3. Allow network access.
+4. Set `METADATA_BACKEND=mongo`.
+5. Paste `MONGODB_URI`.
+6. Verify `/setup/status` shows Mongo enabled.
+
+Expected status:
+
+```json
+{
+  "mongodb_uri_set": true,
+  "mongo_backend_selected": true
+}
+```
+
+## Cloudinary Storage Setup
+
+Cloudinary is used for durable file storage.
+
+Steps:
 1. Create a Cloudinary account.
-2. Copy these values from Cloudinary dashboard:
-- CLOUDINARY_CLOUD_NAME
-- CLOUDINARY_API_KEY
-- CLOUDINARY_API_SECRET
-3. In Render environment variables set:
-- STORAGE_BACKEND=cloudinary
-- CLOUDINARY_CLOUD_NAME=<value>
-- CLOUDINARY_API_KEY=<value>
-- CLOUDINARY_API_SECRET=<value>
-4. Redeploy service.
-5. Upload a new document and test retrieval from WhatsApp.
+2. Copy cloud name, API key, and API secret.
+3. Set `STORAGE_BACKEND=cloudinary` in Render.
+4. Save the Cloudinary values in Render environment variables.
+5. Redeploy.
+6. Upload a fresh file and test retrieval.
 
-Free tier:
-- Yes, Cloudinary free plan is enough to start MVP/testing.
+Benefits:
+- Files survive Render redeploys
+- Twilio can fetch stable public URLs
+- No dependency on local disk persistence
 
 ## Testing
-
-Run automated tests:
 
 ```powershell
 pip install -r requirements-dev.txt
@@ -188,23 +204,23 @@ python -m pytest -q
 
 ## Operational Notes
 
-- Keep Twilio webhook URL and PUBLIC_BASE_URL aligned.
-- Rotate Twilio and MongoDB secrets after public sharing.
-- Sandbox behavior can vary; always confirm active participant status.
-- If STORAGE_BACKEND=local, files can disappear after redeploy.
-- If STORAGE_BACKEND=cloudinary, files remain durable across redeploys.
+- If a file was uploaded before Cloudinary was enabled, re-upload it.
+- If a stale local file is matched, the app now skips it and continues.
+- The system sends a direct link only when WhatsApp media delivery fails.
+- Keep secrets rotated after validation.
 
-## Completed Milestones
+## What v2.0 Solves
 
-- Initial MVP pipeline complete
-- Twilio signature validation hardened for public URL deployment
-- MongoDB backend integrated with compatibility fallback
-- Render deployment completed
-- End-to-end WhatsApp media delivery validated in production
+- Production hosting with Render
+- Durable file storage with Cloudinary
+- Metadata persistence with MongoDB
+- Broken local-disk file lookups after redeploys
+- Better recovery when older documents are stale
+- Safer WhatsApp delivery with link fallback only on failure
 
 ## Coming Soon
 
-- Intelligence Layer: auto-tagging engine that understands document context before storage
-- Secure Vault Mode: extra verification path for personal-sensitive files
-- Retrieval Brain v2: intent-aware ranking that adapts to your query style over time
-- Control Hub: compact command center for analytics, document health, and smart actions
+- Intelligence Layer: upload-time document understanding without manual tag work
+- Secure Vault Mode: extra verification for sensitive files
+- Retrieval Brain v2: smarter ranking that learns your query style
+- Control Hub: a compact command center for search, health, and document insights
