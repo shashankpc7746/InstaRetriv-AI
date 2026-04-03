@@ -1,4 +1,5 @@
 import logging
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ logging.basicConfig(
 logger = logging.getLogger("instaretriv")
 
 app = FastAPI(title=settings.app_name)
+app_start_time = time.monotonic()
 
 
 def create_metadata_repository():
@@ -256,6 +258,12 @@ def setup_status() -> dict[str, bool]:
     }
 
 
+def _is_in_cold_start_window() -> bool:
+    if settings.cold_start_protection_seconds <= 0:
+        return False
+    return (time.monotonic() - app_start_time) < settings.cold_start_protection_seconds
+
+
 @app.get("/admin/documents")
 def list_all_documents() -> dict:
     """Debug endpoint: List all documents stored in MongoDB/JSON."""
@@ -432,6 +440,31 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
     form = await request.form()
     body = str(form.get("Body", ""))
     sender = str(form.get("From", ""))
+    message_sid = str(form.get("MessageSid", ""))
+
+    if _is_in_cold_start_window():
+        logger.warning(
+            "Cold-start guard active; deferring webhook processing: sender=%s message_sid=%s query=%s",
+            sender,
+            message_sid,
+            body,
+        )
+        request_logs.add(
+            {
+                "request_id": request.state.request_id,
+                "type": "webhook",
+                "sender": sender,
+                "query": body,
+                "found": False,
+                "doc_id": None,
+                "twilio_sid": None,
+                "error": "cold-start-window",
+                "message_sid": message_sid,
+            }
+        )
+        return WebhookResponse(
+            message="Service is waking up. Please resend your message in a moment.",
+        )
 
     if settings.require_twilio_signature:
         signature = request.headers.get("X-Twilio-Signature", "")
