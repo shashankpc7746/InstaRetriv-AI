@@ -219,6 +219,19 @@ Completed
 
 ---
 
+## Phase 12.5 - Cold-Start and Duplicate Retry Reliability
+
+### Status
+Completed
+
+### Achievements
+- Replaced blanket cold-start blocking behavior
+- Added MessageSid-based webhook deduplication
+- Preserved first fresh user message processing after wake-up
+- Prevented duplicate/retried webhook events from replaying stale commands
+
+---
+
 ## Current Priorities
 
 1. Add upload-time intelligence for better tags.
