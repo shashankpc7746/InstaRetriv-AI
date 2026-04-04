@@ -1,5 +1,5 @@
 import logging
-import time
+from collections import deque
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,7 +25,6 @@ logging.basicConfig(
 logger = logging.getLogger("instaretriv")
 
 app = FastAPI(title=settings.app_name)
-app_start_time = time.monotonic()
 
 
 def create_metadata_repository():
@@ -47,6 +46,32 @@ def create_metadata_repository():
 
 repository = create_metadata_repository()
 request_logs = RequestLogRepository(settings.request_log_file)
+
+_RECENT_MESSAGE_SIDS_LIMIT = 1000
+_recent_message_sids_queue: deque[str] = deque()
+_recent_message_sids_set: set[str] = set()
+
+
+def _remember_message_sid(message_sid: str) -> None:
+    sid = message_sid.strip()
+    if not sid or sid in _recent_message_sids_set:
+        return
+    _recent_message_sids_queue.append(sid)
+    _recent_message_sids_set.add(sid)
+
+    while len(_recent_message_sids_queue) > _RECENT_MESSAGE_SIDS_LIMIT:
+        evicted = _recent_message_sids_queue.popleft()
+        _recent_message_sids_set.discard(evicted)
+
+
+def _seed_recent_message_sids() -> None:
+    for log_entry in request_logs.latest(limit=500):
+        sid = str(log_entry.get("message_sid", "")).strip()
+        if sid:
+            _remember_message_sid(sid)
+
+
+_seed_recent_message_sids()
 
 
 def create_storage_service():
@@ -199,22 +224,6 @@ def upload_form():
             </div>
 
             <div class="section">
-                <h2>🔍 Admin Tools</h2>
-                <div class="link-list">
-                    <p><strong>View All Stored Documents:</strong></p>
-                    <a href="/admin/documents"><code>GET /admin/documents</code></a>
-                    <p style="margin-top: 10px; font-size: 14px;">See all documents in MongoDB with their tags and details</p>
-                </div>
-                
-                <div class="link-list">
-                    <p><strong>Test Search Query:</strong></p>
-                    <input type="text" id="searchQuery" placeholder="Enter search query (e.g., pan, resume)" value="Pan">
-                    <button onclick="testSearch()">Test Search</button>
-                    <p style="margin-top: 10px; font-size: 14px;">See if your document matches the search query</p>
-                </div>
-            </div>
-
-            <div class="section">
                 <h2>🤖 WhatsApp Integration</h2>
                 <div class="info">
                     <p>Send a WhatsApp message to your Twilio Sandbox with a query like:</p>
@@ -226,17 +235,6 @@ def upload_form():
                 </div>
             </div>
         </div>
-
-        <script>
-        function testSearch() {
-            const query = document.getElementById('searchQuery').value;
-            if (!query.trim()) {
-                alert('Please enter a search query');
-                return;
-            }
-            window.location.href = '/admin/search?q=' + encodeURIComponent(query);
-        }
-        </script>
     </body>
     </html>
     """
@@ -256,75 +254,6 @@ def setup_status() -> dict[str, bool]:
         "cloudinary_configured": settings.cloudinary_configured,
         "cloudinary_backend_selected": settings.use_cloudinary_storage_backend,
     }
-
-
-def _is_in_cold_start_window() -> bool:
-    if settings.cold_start_protection_seconds <= 0:
-        return False
-    return (time.monotonic() - app_start_time) < settings.cold_start_protection_seconds
-
-
-@app.get("/admin/documents")
-def list_all_documents() -> dict:
-    """Debug endpoint: List all documents stored in MongoDB/JSON."""
-    try:
-        all_docs = repository.list_all()
-        return {
-            "total_count": len(all_docs),
-            "backend": "mongo" if settings.use_mongo_metadata_backend else "json",
-            "documents": [
-                {
-                    "id": doc.id,
-                    "file_name": doc.file_name,
-                    "doc_category": doc.doc_category,
-                    "tags": doc.tags,
-                    "is_active": doc.is_active,
-                }
-                for doc in all_docs
-            ],
-        }
-    except Exception as e:
-        logger.error("Error listing documents: %s", str(e))
-        raise HTTPException(status_code=500, detail=f"Error listing documents: {str(e)}")
-
-
-@app.get("/admin/search")
-def test_search(q: str = None) -> dict:
-    """Debug endpoint: Test search query against all documents."""
-    from app.services.matcher import find_best_document
-
-    if not q or not q.strip():
-        raise HTTPException(status_code=400, detail="Query parameter 'q' is required (e.g., /admin/search?q=pan)")
-
-    query = q.strip().lower()
-
-    try:
-        all_docs = repository.list_active()
-        result = find_best_document(query, all_docs)
-
-        return {
-            "query": query,
-            "found": result.found,
-            "total_documents_searched": len(all_docs),
-            "matched_document": {
-                "id": result.document.id,
-                "file_name": result.document.file_name,
-                "doc_category": result.document.doc_category,
-                "tags": result.document.tags,
-                "match_score": result.match_score,
-            } if result.document else None,
-            "all_documents": [
-                {
-                    "id": doc.id,
-                    "file_name": doc.file_name,
-                    "tags": doc.tags,
-                }
-                for doc in all_docs
-            ],
-        }
-    except Exception as e:
-        logger.error("Error searching documents: %s", str(e))
-        raise HTTPException(status_code=500, detail=f"Error searching documents: {str(e)}")
 
 
 @app.post("/upload", response_model=UploadResponse)
@@ -440,13 +369,13 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
     form = await request.form()
     body = str(form.get("Body", ""))
     sender = str(form.get("From", ""))
-    message_sid = str(form.get("MessageSid", ""))
+    inbound_message_sid = str(form.get("MessageSid") or form.get("SmsMessageSid") or "").strip()
 
-    if _is_in_cold_start_window():
-        logger.warning(
-            "Cold-start guard active; deferring webhook processing: sender=%s message_sid=%s query=%s",
+    if inbound_message_sid and inbound_message_sid in _recent_message_sids_set:
+        logger.info(
+            "Duplicate Twilio webhook ignored: sender=%s message_sid=%s query=%s",
             sender,
-            message_sid,
+            inbound_message_sid,
             body,
         )
         request_logs.add(
@@ -458,13 +387,14 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 "found": False,
                 "doc_id": None,
                 "twilio_sid": None,
-                "error": "cold-start-window",
-                "message_sid": message_sid,
+                "error": "duplicate-message-sid",
+                "message_sid": inbound_message_sid,
             }
         )
-        return WebhookResponse(
-            message="Service is waking up. Please resend your message in a moment.",
-        )
+        return WebhookResponse(message="Duplicate webhook ignored.")
+
+    if inbound_message_sid:
+        _remember_message_sid(inbound_message_sid)
 
     if settings.require_twilio_signature:
         signature = request.headers.get("X-Twilio-Signature", "")
@@ -506,6 +436,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "doc_id": None,
                     "twilio_sid": None,
                     "error": "invalid-twilio-signature",
+                    "message_sid": inbound_message_sid,
                 }
             )
             raise HTTPException(status_code=403, detail="Invalid Twilio signature")
@@ -547,6 +478,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "doc_id": result.document.id,
                     "twilio_sid": message_sid,
                     "error": "stored-file-missing-late-check",
+                    "message_sid": inbound_message_sid,
                 }
             )
             return WebhookResponse(message="Stored file missing. Please re-upload your document.")
@@ -575,6 +507,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                         "doc_id": result.document.id,
                         "twilio_sid": message_sid,
                         "error": "remote-file-not-accessible",
+                        "message_sid": inbound_message_sid,
                     }
                 )
                 return WebhookResponse(message="Cloud file link is not accessible. Please re-upload the document.")
@@ -618,6 +551,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 "found": True,
                 "doc_id": result.document.id,
                 "twilio_sid": message_sid,
+                "message_sid": inbound_message_sid,
             }
         )
         return WebhookResponse(
@@ -651,6 +585,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 "twilio_sid": message_sid,
                 "error": "no-retrievable-document-stale-only",
                 "stale_count": stale_count,
+                "message_sid": inbound_message_sid,
             }
         )
         return WebhookResponse(message="Stored files were missing. Please re-upload your document.")
@@ -665,6 +600,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             "found": False,
             "doc_id": None,
             "twilio_sid": None,
+            "message_sid": inbound_message_sid,
         }
     )
     return WebhookResponse(message="Document not found. Please refine your request.")
