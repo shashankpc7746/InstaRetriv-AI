@@ -10,14 +10,13 @@ The assistant finds the best match and delivers the file to WhatsApp, with durab
 
 ## Version
 
-v2.0
+v2.1
 
-What v2.0 achieved after v1.0:
-- Production deployment on Render
-- MongoDB Atlas metadata persistence
-- Cloudinary-backed durable file storage
-- Safer retrieval flow with stale-file skipping
-- WhatsApp delivery fallback handling
+What v2.1 achieved after v2.0:
+- MessageSid-based webhook deduplication for cold-start reliability
+- First fresh message is processed after wake-up (no blanket cold-start block)
+- Temporary debug surfaces removed from public API
+- Documentation aligned with production behavior
 
 ## Project Status
 
@@ -80,8 +79,6 @@ The system is live and operational with:
 - GET /documents
 - DELETE /documents/{document_id}
 - GET /logs/recent
-- GET /admin/documents
-- GET /admin/search
 
 ## Local Setup
 
@@ -206,10 +203,12 @@ python -m pytest -q
 
 - If a file was uploaded before Cloudinary was enabled, re-upload it.
 - If a stale local file is matched, the app now skips it and continues.
+- Webhook duplicate retries are filtered using Twilio MessageSid deduplication.
+- First fresh message after backend wake-up is processed (no forced warm-up-only drop).
 - The system sends a direct link only when WhatsApp media delivery fails.
 - Keep secrets rotated after validation.
 
-## What v2.0 Solves
+## What v2.1 Solves
 
 - Production hosting with Render
 - Durable file storage with Cloudinary
@@ -217,6 +216,7 @@ python -m pytest -q
 - Broken local-disk file lookups after redeploys
 - Better recovery when older documents are stale
 - Safer WhatsApp delivery with link fallback only on failure
+- Improved cold-start behavior with duplicate retry protection
 
 ## Coming Soon
 
