@@ -477,13 +477,19 @@ def delivery_summary(limit: int = 200) -> dict:
         count for state, count in state_counter.items() if state in _TERMINAL_DELIVERY_STATES
     )
     success_total = state_counter.get("delivered", 0) + state_counter.get("read", 0)
+    failed_total = state_counter.get("failed", 0) + state_counter.get("canceled", 0)
+    pending_total = len(latest_by_sid) - terminal_total
     success_rate = round((success_total / terminal_total) * 100, 2) if terminal_total > 0 else None
+    failure_rate = round((failed_total / terminal_total) * 100, 2) if terminal_total > 0 else None
 
     return {
         "tracked_message_count": len(latest_by_sid),
         "terminal_message_count": terminal_total,
+        "pending_message_count": pending_total,
         "successful_terminal_count": success_total,
+        "failed_terminal_count": failed_total,
         "success_rate_percent": success_rate,
+        "failure_rate_percent": failure_rate,
         "counts_by_state": dict(sorted(state_counter.items())),
     }
 
