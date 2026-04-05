@@ -245,6 +245,9 @@ Completed
 
 ## Phase 13 - Smart Upload Intelligence
 
+### Status
+Not Started
+
 ### Goal
 Reduce manual tag work and improve retrieval quality at upload time.
 
@@ -253,9 +256,17 @@ Reduce manual tag work and improve retrieval quality at upload time.
 - Smarter tags from filenames and content hints
 - Less user effort during upload
 
+### Next Checkpoints
+- Add filename-based auto-tag extraction during upload
+- Add optional category suggestion from detected keywords
+- Add confidence-aware merge between manual tags and auto-tags
+
 ---
 
 ## Phase 14 - Secure Vault Mode
+
+### Status
+Not Started
 
 ### Goal
 Protect highly sensitive documents with extra verification.
@@ -265,9 +276,17 @@ Protect highly sensitive documents with extra verification.
 - Controlled access over WhatsApp
 - Better protection for identity and financial files
 
+### Next Checkpoints
+- Extend metadata schema with `is_private` and `access_code_hash`
+- Require OTP/passcode challenge for private-document retrieval in webhook flow
+- Add audit log entries for private-document access attempts
+
 ---
 
 ## Phase 15 - Delivery Observability
+
+### Status
+In Progress
 
 ### Goal
 Track whether a WhatsApp delivery truly reached the user.
@@ -276,6 +295,13 @@ Track whether a WhatsApp delivery truly reached the user.
 - Delivery callback logging
 - Better failure diagnostics
 - Clearer message lifecycle state
+
+### Initial Implementation Completed
+- Added Twilio status callback endpoint (`POST /webhook/status`)
+- Added delivery observability endpoint (`GET /logs/delivery`)
+- Correlated outbound Twilio message SID values with callback statuses
+- Added normalized delivery lifecycle states per message SID
+- Added delivery diagnostics summary endpoint (`GET /logs/delivery/summary`)
 
 ---
 
@@ -298,3 +324,9 @@ Give a simple operational view of documents, delivery, and cleanup.
 - Optional dashboard
 - Smarter intent handling
 - Cloud file migration utilities
+
+---
+
+## Final Branding Attempt (Later)
+
+At the end of core roadmap execution, we will try to move from Twilio sandbox branding to a production WhatsApp Business sender so the display name can be set to InstaRetri AI and a custom profile photo can be used (subject to Meta/Twilio approval).
