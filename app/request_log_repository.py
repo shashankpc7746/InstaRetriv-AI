@@ -27,3 +27,11 @@ class RequestLogRepository:
     def latest(self, limit: int = 20) -> list[dict[str, Any]]:
         logs = self._read_all()
         return logs[-limit:]
+
+    def latest_by_type(self, log_type: str, limit: int = 20) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+
+        logs = self._read_all()
+        filtered = [entry for entry in logs if entry.get("type") == log_type]
+        return filtered[-limit:]

@@ -1,5 +1,5 @@
 import logging
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path
 from uuid import uuid4
 
@@ -50,6 +50,42 @@ request_logs = RequestLogRepository(settings.request_log_file)
 _RECENT_MESSAGE_SIDS_LIMIT = 1000
 _recent_message_sids_queue: deque[str] = deque()
 _recent_message_sids_set: set[str] = set()
+
+_TERMINAL_DELIVERY_STATES = {"delivered", "read", "failed", "undelivered", "canceled"}
+
+
+def _normalize_twilio_status(message_status: str, error_code: str | None) -> str:
+    status = (message_status or "").strip().lower()
+    if error_code:
+        return "failed"
+
+    status_map = {
+        "queued": "queued",
+        "accepted": "queued",
+        "scheduled": "queued",
+        "sending": "sending",
+        "sent": "sent",
+        "delivered": "delivered",
+        "read": "read",
+        "undelivered": "failed",
+        "failed": "failed",
+        "canceled": "canceled",
+    }
+    return status_map.get(status, "unknown")
+
+
+def _delivery_stage_rank(normalized_state: str) -> int:
+    stage_order = {
+        "unknown": 0,
+        "queued": 1,
+        "sending": 2,
+        "sent": 3,
+        "delivered": 4,
+        "read": 5,
+        "failed": 6,
+        "canceled": 6,
+    }
+    return stage_order.get(normalized_state, 0)
 
 
 def _remember_message_sid(message_sid: str) -> None:
@@ -364,6 +400,94 @@ def recent_logs(limit: int = 20) -> list[dict]:
     return request_logs.latest(limit=limit)
 
 
+@app.get("/logs/delivery")
+def recent_delivery_logs(limit: int = 20) -> list[dict]:
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
+
+    webhook_logs = request_logs.latest_by_type(log_type="webhook", limit=2000)
+    callback_logs = request_logs.latest_by_type(log_type="twilio-status-callback", limit=4000)
+
+    latest_status_by_sid: dict[str, dict] = {}
+    for callback_entry in reversed(callback_logs):
+        sid = str(callback_entry.get("twilio_sid") or "").strip()
+        if not sid:
+            continue
+        if sid not in latest_status_by_sid:
+            latest_status_by_sid[sid] = callback_entry
+
+    correlated_logs: list[dict] = []
+    for entry in reversed(webhook_logs):
+        sid = str(entry.get("twilio_sid") or "").strip()
+        if not sid:
+            continue
+
+        callback = latest_status_by_sid.get(sid)
+        correlated_logs.append(
+            {
+                "timestamp": entry.get("timestamp"),
+                "request_id": entry.get("request_id"),
+                "sender": entry.get("sender"),
+                "query": entry.get("query"),
+                "doc_id": entry.get("doc_id"),
+                "found": entry.get("found"),
+                "twilio_sid": sid,
+                "delivery_status": callback.get("message_status") if callback else "unknown",
+                "normalized_delivery_state": callback.get("normalized_state") if callback else "unknown",
+                "status_timestamp": callback.get("timestamp") if callback else None,
+                "error_code": callback.get("error_code") if callback else None,
+                "error_message": callback.get("error_message") if callback else None,
+            }
+        )
+        if len(correlated_logs) >= limit:
+            break
+
+    return list(reversed(correlated_logs))
+
+
+@app.get("/logs/delivery/summary")
+def delivery_summary(limit: int = 200) -> dict:
+    if limit < 1 or limit > 2000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
+
+    callback_logs = request_logs.latest_by_type(log_type="twilio-status-callback", limit=limit)
+    latest_by_sid: dict[str, dict] = {}
+
+    for entry in callback_logs:
+        sid = str(entry.get("twilio_sid") or "").strip()
+        if not sid:
+            continue
+
+        existing = latest_by_sid.get(sid)
+        if existing is None:
+            latest_by_sid[sid] = entry
+            continue
+
+        incoming_state = str(entry.get("normalized_state") or "unknown")
+        existing_state = str(existing.get("normalized_state") or "unknown")
+
+        if _delivery_stage_rank(incoming_state) >= _delivery_stage_rank(existing_state):
+            latest_by_sid[sid] = entry
+
+    state_counter = Counter(
+        str(entry.get("normalized_state") or "unknown") for entry in latest_by_sid.values()
+    )
+
+    terminal_total = sum(
+        count for state, count in state_counter.items() if state in _TERMINAL_DELIVERY_STATES
+    )
+    success_total = state_counter.get("delivered", 0) + state_counter.get("read", 0)
+    success_rate = round((success_total / terminal_total) * 100, 2) if terminal_total > 0 else None
+
+    return {
+        "tracked_message_count": len(latest_by_sid),
+        "terminal_message_count": terminal_total,
+        "successful_terminal_count": success_total,
+        "success_rate_percent": success_rate,
+        "counts_by_state": dict(sorted(state_counter.items())),
+    }
+
+
 @app.post("/webhook", response_model=WebhookResponse)
 async def whatsapp_webhook(request: Request) -> WebhookResponse:
     form = await request.form()
@@ -604,3 +728,69 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         }
     )
     return WebhookResponse(message="Document not found. Please refine your request.")
+
+
+@app.post("/webhook/status")
+async def twilio_status_callback(request: Request) -> dict[str, str]:
+    form = await request.form()
+    twilio_sid = str(form.get("MessageSid") or form.get("SmsSid") or "").strip()
+    message_status = str(form.get("MessageStatus") or form.get("SmsStatus") or "").strip().lower()
+    to_number = str(form.get("To") or "").strip()
+    from_number = str(form.get("From") or "").strip()
+    error_code = str(form.get("ErrorCode") or "").strip() or None
+    error_message = str(form.get("ErrorMessage") or "").strip() or None
+    normalized_state = _normalize_twilio_status(message_status=message_status, error_code=error_code)
+
+    if settings.require_twilio_signature:
+        signature = request.headers.get("X-Twilio-Signature", "")
+        form_data = {key: str(value) for key, value in form.items()}
+        validation_url = str(request.url)
+        if settings.public_base_url.strip():
+            validation_url = f"{settings.public_base_url.rstrip('/')}{request.url.path}"
+            if request.url.query:
+                validation_url = f"{validation_url}?{request.url.query}"
+
+        auth_tokens = [settings.twilio_auth_token]
+        if settings.twilio_secondary_auth_token.strip():
+            auth_tokens.append(settings.twilio_secondary_auth_token)
+
+        is_valid_signature = any(
+            is_valid_twilio_signature(
+                auth_token=auth_token,
+                request_url=validation_url,
+                form_data=form_data,
+                signature=signature,
+            )
+            for auth_token in auth_tokens
+        )
+        if not is_valid_signature:
+            logger.warning(
+                "Invalid Twilio status callback signature blocked for request_id=%s url=%s token_count=%s",
+                request.state.request_id,
+                validation_url,
+                len(auth_tokens),
+            )
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    request_logs.add(
+        {
+            "request_id": request.state.request_id,
+            "type": "twilio-status-callback",
+            "twilio_sid": twilio_sid,
+            "message_status": message_status,
+            "normalized_state": normalized_state,
+            "to": to_number,
+            "from": from_number,
+            "error_code": error_code,
+            "error_message": error_message,
+        }
+    )
+
+    logger.info(
+        "Twilio status callback received: sid=%s status=%s error_code=%s",
+        twilio_sid,
+        normalized_state,
+        error_code,
+    )
+
+    return {"message": "Status callback received"}
