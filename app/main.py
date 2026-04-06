@@ -1,4 +1,5 @@
 import logging
+import re
 from collections import Counter, deque
 from pathlib import Path
 from uuid import uuid4
@@ -174,6 +175,87 @@ def _is_remote_file_accessible(url: str) -> bool:
         return False
 
 
+def _extract_filename_tags(filename: str) -> list[str]:
+    stem = Path(filename).stem.lower()
+    if not stem:
+        return []
+
+    # Split on non-alphanumeric boundaries and remove noisy/common fragments.
+    raw_parts = re.split(r"[^a-z0-9]+", stem)
+    stop_words = {
+        "final",
+        "new",
+        "copy",
+        "scan",
+        "image",
+        "img",
+        "document",
+        "doc",
+        "file",
+        "latest",
+        "updated",
+        "version",
+        "v",
+    }
+
+    extracted: list[str] = []
+    for part in raw_parts:
+        token = part.strip()
+        if not token or len(token) < 2:
+            continue
+        if token in stop_words:
+            continue
+        if token.isdigit() and len(token) < 4:
+            continue
+        extracted.append(token)
+
+    return extracted
+
+
+def _merge_tags(manual_tags: list[str], filename: str) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+
+    for tag in manual_tags + _extract_filename_tags(filename):
+        normalized = tag.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(normalized)
+
+    return merged
+
+
+def _suggest_doc_category(tags: list[str]) -> tuple[str | None, float]:
+    if not tags:
+        return None, 0.0
+
+    tokens = set(tags)
+    category_keywords: dict[str, set[str]] = {
+        "resume": {"resume", "cv", "curriculum", "vitae", "profile"},
+        "cover-letter": {"cover", "letter", "motivation"},
+        "certificate": {"certificate", "cert", "diploma", "transcript"},
+        "id": {"aadhar", "aadhaar", "pan", "passport", "license", "id"},
+        "invoice": {"invoice", "bill", "receipt", "gst", "payment"},
+        "bank": {"bank", "statement", "passbook", "account", "ifsc"},
+    }
+
+    best_category = None
+    best_match_count = 0
+    for category, keywords in category_keywords.items():
+        match_count = len(tokens & keywords)
+        if match_count > best_match_count:
+            best_match_count = match_count
+            best_category = category
+
+    if not best_category or best_match_count == 0:
+        return None, 0.0
+
+    # 1 strong keyword or 2 weak keyword matches make this a usable hint.
+    confidence = min(1.0, best_match_count / 2.0)
+    return best_category, round(confidence, 2)
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = str(uuid4())
@@ -306,6 +388,20 @@ async def upload_document(
     if not parsed_tags:
         raise HTTPException(status_code=400, detail="At least one tag is required.")
 
+    final_tags = _merge_tags(parsed_tags, file.filename)
+    input_category = doc_category.strip().lower()
+
+    suggested_category, suggestion_confidence = _suggest_doc_category(final_tags)
+    generic_categories = {"general", "misc", "other", "document", "documents", "file", "id"}
+
+    final_category = input_category
+    if (
+        suggested_category
+        and input_category in generic_categories
+        and suggestion_confidence >= 0.5
+    ):
+        final_category = suggested_category
+
     extension = Path(file.filename).suffix.lower().lstrip(".")
     if settings.allowed_extensions_list and extension not in settings.allowed_extensions_list:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: .{extension}")
@@ -314,8 +410,8 @@ async def upload_document(
     document = DocumentMetadata(
         file_name=file.filename,
         file_type=extension,
-        doc_category=doc_category.strip().lower(),
-        tags=parsed_tags,
+        doc_category=final_category,
+        tags=final_tags,
         storage_path=storage_path,
     )
 
@@ -328,6 +424,10 @@ async def upload_document(
             "file_name": document.file_name,
             "doc_id": document.id,
             "tags": document.tags,
+            "doc_category_input": input_category,
+            "doc_category_final": final_category,
+            "doc_category_suggested": suggested_category,
+            "doc_category_suggestion_confidence": suggestion_confidence,
         }
     )
 
