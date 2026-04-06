@@ -76,3 +76,68 @@ def test_list_and_archive_document(tmp_path: Path) -> None:
     post_archive_list = client.get("/documents", params={"active_only": "true"})
     assert post_archive_list.status_code == 200
     assert len(post_archive_list.json()) == 0
+
+
+def test_upload_auto_extracts_filename_tags(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    upload_response = client.post(
+        "/upload",
+        data={"doc_category": "id", "tags": "important"},
+        files={"file": ("pan_card_2024_final.pdf", b"dummy-pdf-content", "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()["document"]
+    assert "important" in uploaded["tags"]
+    assert "pan" in uploaded["tags"]
+    assert "card" in uploaded["tags"]
+    assert "2024" in uploaded["tags"]
+    assert "final" not in uploaded["tags"]
+
+
+def test_upload_auto_tags_do_not_duplicate_manual_tags(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    upload_response = client.post(
+        "/upload",
+        data={"doc_category": "resume", "tags": "resume, cv"},
+        files={"file": ("resume_cv_latest.pdf", b"dummy-pdf-content", "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()["document"]
+    assert uploaded["tags"].count("resume") == 1
+    assert uploaded["tags"].count("cv") == 1
+
+
+def test_upload_suggests_category_for_generic_input(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    upload_response = client.post(
+        "/upload",
+        data={"doc_category": "other", "tags": "important"},
+        files={"file": ("resume_cv_2026.pdf", b"dummy-pdf-content", "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()["document"]
+    assert uploaded["doc_category"] == "resume"
+
+
+def test_upload_keeps_specific_category_even_if_suggestion_exists(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    upload_response = client.post(
+        "/upload",
+        data={"doc_category": "invoice", "tags": "urgent"},
+        files={"file": ("resume_profile.pdf", b"dummy-pdf-content", "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()["document"]
+    assert uploaded["doc_category"] == "invoice"
