@@ -246,7 +246,7 @@ Completed
 ## Phase 13 - Smart Upload Intelligence
 
 ### Status
-Not Started
+In Progress
 
 ### Goal
 Reduce manual tag work and improve retrieval quality at upload time.
@@ -257,8 +257,8 @@ Reduce manual tag work and improve retrieval quality at upload time.
 - Less user effort during upload
 
 ### Next Checkpoints
-- Add filename-based auto-tag extraction during upload
-- Add optional category suggestion from detected keywords
+- Add filename-based auto-tag extraction during upload (completed)
+- Add optional category suggestion from detected keywords (completed)
 - Add confidence-aware merge between manual tags and auto-tags
 
 ---
