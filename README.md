@@ -17,6 +17,7 @@ What v2.1 achieved after v2.0:
 - First fresh message is processed after wake-up (no blanket cold-start block)
 - Temporary debug surfaces removed from public API
 - Documentation aligned with production behavior
+- Upload page now supports Phase 13 smart-tag helpers and Phase 14 private-document controls
 
 ## Project Status
 
@@ -37,6 +38,9 @@ The system is live and operational with:
 ## What It Can Do
 
 - Upload files with categories and tags
+- Auto-enrich uploaded tags from the filename
+- Suggest a category when the uploaded category is generic
+- Mark sensitive files as private with a passcode
 - Retrieve documents using conversational queries
 - Match by keywords, synonyms, and fuzzy scoring
 - Deliver files through WhatsApp
@@ -206,6 +210,7 @@ python -m pytest -q
 - Webhook duplicate retries are filtered using Twilio MessageSid deduplication.
 - First fresh message after backend wake-up is processed (no forced warm-up-only drop).
 - The system sends a direct link only when WhatsApp media delivery fails.
+- The upload form now shows private-document controls and explains smart upload behavior.
 - Keep secrets rotated after validation.
 
 ## What v2.1 Solves

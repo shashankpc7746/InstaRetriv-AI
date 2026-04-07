@@ -266,7 +266,7 @@ Reduce manual tag work and improve retrieval quality at upload time.
 ## Phase 14 - Secure Vault Mode
 
 ### Status
-Not Started
+In Progress
 
 ### Goal
 Protect highly sensitive documents with extra verification.
@@ -277,9 +277,9 @@ Protect highly sensitive documents with extra verification.
 - Better protection for identity and financial files
 
 ### Next Checkpoints
-- Extend metadata schema with `is_private` and `access_code_hash`
-- Require OTP/passcode challenge for private-document retrieval in webhook flow
-- Add audit log entries for private-document access attempts
+- Extend metadata schema with `is_private` and `access_code_hash` (completed)
+- Require OTP/passcode challenge for private-document retrieval in webhook flow (completed)
+- Add audit log entries for private-document access attempts (completed)
 
 ---
 
