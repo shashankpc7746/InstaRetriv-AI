@@ -1,5 +1,7 @@
 import logging
 import re
+from hashlib import sha256
+from hmac import compare_digest
 from collections import Counter, deque
 from pathlib import Path
 from uuid import uuid4
@@ -51,6 +53,7 @@ request_logs = RequestLogRepository(settings.request_log_file)
 _RECENT_MESSAGE_SIDS_LIMIT = 1000
 _recent_message_sids_queue: deque[str] = deque()
 _recent_message_sids_set: set[str] = set()
+_private_access_challenges: dict[str, dict[str, int | str]] = {}
 
 _TERMINAL_DELIVERY_STATES = {"delivered", "read", "failed", "undelivered", "canceled"}
 
@@ -256,6 +259,32 @@ def _suggest_doc_category(tags: list[str]) -> tuple[str | None, float]:
     return best_category, round(confidence, 2)
 
 
+def _hash_access_code(access_code: str) -> str:
+    normalized = access_code.strip()
+    return sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _verify_access_code(document: DocumentMetadata, access_code: str) -> bool:
+    if not document.access_code_hash:
+        return False
+    return compare_digest(document.access_code_hash, _hash_access_code(access_code))
+
+
+def _extract_access_code_from_message(body: str) -> str | None:
+    text = (body or "").strip()
+    if not text:
+        return None
+
+    match = re.search(r"(?:passcode|code|pin|otp)\s*[:\-]?\s*([a-zA-Z0-9]{4,16})", text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    if re.fullmatch(r"[a-zA-Z0-9]{4,16}", text):
+        return text
+
+    return None
+
+
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = str(uuid4())
@@ -316,6 +345,11 @@ def upload_form():
             a:hover { text-decoration: underline; }
             .link-list { background: white; padding: 15px; border-radius: 4px; margin: 10px 0; }
             code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
+            .checkbox-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+            .checkbox-row input[type='checkbox'] { width: auto; margin: 0; }
+            .private-fields { display: none; background: #fff7e6; border: 1px solid #f2c97d; padding: 12px; border-radius: 6px; margin-top: 12px; }
+            .private-fields.active { display: block; }
+            .hint { color: #555; font-size: 14px; margin-top: 4px; }
         </style>
     </head>
     <body>
@@ -328,6 +362,19 @@ def upload_form():
                     <input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.webp">
                     <input type="text" name="doc_category" placeholder="Category (e.g., resume, certificate)" required>
                     <textarea name="tags" placeholder="Tags separated by commas (e.g., resume, pdf, work)" required></textarea>
+
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="is_private" name="is_private" value="true">
+                        <label for="is_private"><strong>Mark as private document</strong> (Phase 14 Secure Vault)</label>
+                    </div>
+
+                    <div id="private-fields" class="private-fields">
+                        <label for="access_code"><strong>Access code</strong> (minimum 4 characters)</label>
+                        <input type="password" id="access_code" name="access_code" minlength="4" placeholder="Enter access code for this document">
+                        <div class="hint">Private docs require this code in WhatsApp retrieval, e.g. <code>code 1234</code>.</div>
+                    </div>
+
+                    <div class="hint">Phase 13: Tags are auto-enriched from filename and category can be auto-suggested if you choose a generic category.</div>
                     <button type="submit">Upload Document</button>
                 </form>
             </div>
@@ -353,6 +400,31 @@ def upload_form():
                 </div>
             </div>
         </div>
+        <script>
+            const privateToggle = document.getElementById('is_private');
+            const privateFields = document.getElementById('private-fields');
+            const accessCodeInput = document.getElementById('access_code');
+
+            function syncPrivateUI() {
+                const enabled = privateToggle && privateToggle.checked;
+                if (!privateFields || !accessCodeInput) {
+                    return;
+                }
+                if (enabled) {
+                    privateFields.classList.add('active');
+                    accessCodeInput.required = true;
+                } else {
+                    privateFields.classList.remove('active');
+                    accessCodeInput.required = false;
+                    accessCodeInput.value = '';
+                }
+            }
+
+            if (privateToggle) {
+                privateToggle.addEventListener('change', syncPrivateUI);
+                syncPrivateUI();
+            }
+        </script>
     </body>
     </html>
     """
@@ -380,6 +452,8 @@ async def upload_document(
     file: UploadFile = File(...),
     doc_category: str = Form(...),
     tags: str = Form(...),
+    is_private: bool = Form(False),
+    access_code: str | None = Form(None),
 ) -> UploadResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required.")
@@ -406,6 +480,13 @@ async def upload_document(
     if settings.allowed_extensions_list and extension not in settings.allowed_extensions_list:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: .{extension}")
 
+    access_code_hash = None
+    if is_private:
+        normalized_access_code = (access_code or "").strip()
+        if len(normalized_access_code) < 4:
+            raise HTTPException(status_code=400, detail="Private documents require an access_code with at least 4 characters.")
+        access_code_hash = _hash_access_code(normalized_access_code)
+
     storage_path = await storage_service.save(file)
     document = DocumentMetadata(
         file_name=file.filename,
@@ -413,6 +494,8 @@ async def upload_document(
         doc_category=final_category,
         tags=final_tags,
         storage_path=storage_path,
+        is_private=is_private,
+        access_code_hash=access_code_hash,
     )
 
     repository.add(document)
@@ -428,6 +511,7 @@ async def upload_document(
             "doc_category_final": final_category,
             "doc_category_suggested": suggested_category,
             "doc_category_suggestion_confidence": suggestion_confidence,
+            "is_private": is_private,
         }
     )
 
@@ -675,7 +759,128 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         logger.warning("Unauthorized sender blocked: %s", sender)
         return WebhookResponse(message="Unauthorized sender.")
 
-    result, stale_count = _resolve_best_retrievable_document(body)
+    provided_access_code = _extract_access_code_from_message(body)
+    result: RetrievalResult | None = None
+    stale_count = 0
+    sender_challenge = _private_access_challenges.get(sender)
+    if sender and sender_challenge:
+        challenged_doc_id = str(sender_challenge.get("doc_id") or "")
+        challenged_document = repository.get_by_id(challenged_doc_id) if challenged_doc_id else None
+
+        if challenged_document is None or not challenged_document.is_active or not challenged_document.is_private:
+            _private_access_challenges.pop(sender, None)
+        elif not provided_access_code:
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": challenged_document.id,
+                    "status": "challenge-pending",
+                    "reason": "missing-passcode",
+                    "message_sid": inbound_message_sid,
+                }
+            )
+            return WebhookResponse(
+                message=(
+                    f"Pending private access for {challenged_document.file_name}. "
+                    "Reply with your passcode (for example: code 1234)."
+                )
+            )
+        elif _verify_access_code(challenged_document, provided_access_code):
+            _private_access_challenges.pop(sender, None)
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": challenged_document.id,
+                    "status": "access-granted",
+                    "reason": "challenge-response",
+                    "message_sid": inbound_message_sid,
+                }
+            )
+            result = RetrievalResult(found=True, document=challenged_document, score=999.0)
+            stale_count = 0
+        else:
+            attempts = int(sender_challenge.get("attempts") or 0) + 1
+            sender_challenge["attempts"] = attempts
+            _private_access_challenges[sender] = sender_challenge
+            if attempts >= 3:
+                _private_access_challenges.pop(sender, None)
+
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": challenged_document.id,
+                    "status": "access-denied",
+                    "reason": "invalid-passcode",
+                    "attempt": attempts,
+                    "message_sid": inbound_message_sid,
+                }
+            )
+            if attempts >= 3:
+                return WebhookResponse(message="Access denied. Too many invalid passcode attempts. Start a new request.")
+            return WebhookResponse(message="Invalid passcode. Please try again.")
+
+    if result is None:
+        result, stale_count = _resolve_best_retrievable_document(body)
+
+    if result.found and result.document is not None and result.document.is_private:
+        if not provided_access_code:
+            if sender:
+                _private_access_challenges[sender] = {"doc_id": result.document.id, "attempts": 0}
+
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": result.document.id,
+                    "status": "challenge-issued",
+                    "reason": "passcode-required",
+                    "message_sid": inbound_message_sid,
+                }
+            )
+            return WebhookResponse(
+                message=(
+                    f"{result.document.file_name} is a private document. "
+                    "Reply with your passcode (for example: code 1234)."
+                )
+            )
+
+        if not _verify_access_code(result.document, provided_access_code):
+            if sender:
+                _private_access_challenges[sender] = {"doc_id": result.document.id, "attempts": 1}
+
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": result.document.id,
+                    "status": "access-denied",
+                    "reason": "invalid-passcode",
+                    "attempt": 1,
+                    "message_sid": inbound_message_sid,
+                }
+            )
+            return WebhookResponse(message="Invalid passcode. Please try again.")
+
+        _private_access_challenges.pop(sender, None)
+        request_logs.add(
+            {
+                "request_id": request.state.request_id,
+                "type": "private-access-audit",
+                "sender": sender,
+                "doc_id": result.document.id,
+                "status": "access-granted",
+                "reason": "inline-passcode",
+                "message_sid": inbound_message_sid,
+            }
+        )
 
     if result.found and result.document is not None:
         message = f"Document found: {result.document.file_name}."
