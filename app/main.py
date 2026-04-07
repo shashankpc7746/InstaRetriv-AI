@@ -259,6 +259,41 @@ def _suggest_doc_category(tags: list[str]) -> tuple[str | None, float]:
     return best_category, round(confidence, 2)
 
 
+def _derive_final_tags(manual_tags: list[str], filename: str, category: str, extension: str) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+
+    def add_token(token: str) -> None:
+        normalized = (token or "").strip().lower()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        merged.append(normalized)
+
+    for token in manual_tags:
+        add_token(token)
+
+    for token in _extract_filename_tags(filename):
+        add_token(token)
+
+    if category and category not in {"general", "misc", "other", "document", "documents", "file"}:
+        add_token(category)
+
+    if not merged:
+        add_token(extension)
+
+    return merged
+
+
+def _send_webhook_text_reply(sender: str, body: str) -> str | None:
+    if not whatsapp_sender.enabled:
+        logger.warning("WhatsApp sender is not enabled. Twilio creds may be missing.")
+        return None
+    if not sender.strip():
+        return None
+    return whatsapp_sender.send_text(to_number=sender, body=body)
+
+
 def _hash_access_code(access_code: str) -> str:
     normalized = access_code.strip()
     return sha256(normalized.encode("utf-8")).hexdigest()
@@ -360,8 +395,8 @@ def upload_form():
                 <h2>Upload Document</h2>
                 <form method="post" action="/upload" enctype="multipart/form-data">
                     <input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.webp">
-                    <input type="text" name="doc_category" placeholder="Category (e.g., resume, certificate)" required>
-                    <textarea name="tags" placeholder="Tags separated by commas (e.g., resume, pdf, work)" required></textarea>
+                    <input type="text" name="doc_category" placeholder="Category (optional: e.g., resume, certificate)">
+                    <textarea name="tags" placeholder="Tags (optional, comma-separated: e.g., resume, pdf, work)"></textarea>
 
                     <div class="checkbox-row">
                         <input type="checkbox" id="is_private" name="is_private" value="true">
@@ -437,6 +472,7 @@ def setup_status() -> dict[str, bool]:
         "twilio_sid_set": bool(settings.twilio_account_sid.strip()),
         "twilio_auth_token_set": bool(settings.twilio_auth_token.strip()),
         "twilio_whatsapp_from_set": bool(settings.twilio_whatsapp_from.strip()),
+        "twilio_sender_enabled": whatsapp_sender.enabled,
         "public_base_url_set": bool(settings.public_base_url.strip()),
         "require_twilio_signature": settings.require_twilio_signature,
         "mongodb_uri_set": bool(settings.mongodb_uri.strip()),
@@ -450,8 +486,8 @@ def setup_status() -> dict[str, bool]:
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
-    doc_category: str = Form(...),
-    tags: str = Form(...),
+    doc_category: str = Form(""),
+    tags: str = Form(""),
     is_private: bool = Form(False),
     access_code: str | None = Form(None),
 ) -> UploadResponse:
@@ -459,26 +495,25 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="File name is required.")
 
     parsed_tags = [tag.strip().lower() for tag in tags.split(",") if tag.strip()]
-    if not parsed_tags:
-        raise HTTPException(status_code=400, detail="At least one tag is required.")
-
-    final_tags = _merge_tags(parsed_tags, file.filename)
     input_category = doc_category.strip().lower()
-
-    suggested_category, suggestion_confidence = _suggest_doc_category(final_tags)
-    generic_categories = {"general", "misc", "other", "document", "documents", "file", "id"}
-
-    final_category = input_category
-    if (
-        suggested_category
-        and input_category in generic_categories
-        and suggestion_confidence >= 0.5
-    ):
-        final_category = suggested_category
 
     extension = Path(file.filename).suffix.lower().lstrip(".")
     if settings.allowed_extensions_list and extension not in settings.allowed_extensions_list:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: .{extension}")
+
+    provisional_category = input_category or "general"
+    final_tags = _derive_final_tags(parsed_tags, file.filename, provisional_category, extension)
+
+    suggested_category, suggestion_confidence = _suggest_doc_category(final_tags)
+    generic_categories = {"", "general", "misc", "other", "document", "documents", "file", "id"}
+
+    final_category = input_category or "general"
+    if (
+        suggested_category
+        and final_category in generic_categories
+        and suggestion_confidence >= 0.5
+    ):
+        final_category = suggested_category
 
     access_code_hash = None
     if is_private:
@@ -757,6 +792,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
 
     if settings.authorized_senders_list and sender not in settings.authorized_senders_list:
         logger.warning("Unauthorized sender blocked: %s", sender)
+        _send_webhook_text_reply(sender, "Unauthorized sender.")
         return WebhookResponse(message="Unauthorized sender.")
 
     provided_access_code = _extract_access_code_from_message(body)
@@ -770,6 +806,13 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         if challenged_document is None or not challenged_document.is_active or not challenged_document.is_private:
             _private_access_challenges.pop(sender, None)
         elif not provided_access_code:
+            reply_sid = _send_webhook_text_reply(
+                sender,
+                (
+                    f"Pending private access for {challenged_document.file_name}. "
+                    "Reply with your passcode (for example: code 1234)."
+                ),
+            )
             request_logs.add(
                 {
                     "request_id": request.state.request_id,
@@ -778,6 +821,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "doc_id": challenged_document.id,
                     "status": "challenge-pending",
                     "reason": "missing-passcode",
+                    "twilio_sid": reply_sid,
                     "message_sid": inbound_message_sid,
                 }
             )
@@ -822,7 +866,9 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 }
             )
             if attempts >= 3:
+                _send_webhook_text_reply(sender, "Access denied. Too many invalid passcode attempts. Start a new request.")
                 return WebhookResponse(message="Access denied. Too many invalid passcode attempts. Start a new request.")
+            _send_webhook_text_reply(sender, "Invalid passcode. Please try again.")
             return WebhookResponse(message="Invalid passcode. Please try again.")
 
     if result is None:
@@ -833,6 +879,14 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             if sender:
                 _private_access_challenges[sender] = {"doc_id": result.document.id, "attempts": 0}
 
+            reply_sid = _send_webhook_text_reply(
+                sender,
+                (
+                    f"{result.document.file_name} is a private document. "
+                    "Reply with your passcode (for example: code 1234)."
+                ),
+            )
+
             request_logs.add(
                 {
                     "request_id": request.state.request_id,
@@ -841,6 +895,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "doc_id": result.document.id,
                     "status": "challenge-issued",
                     "reason": "passcode-required",
+                    "twilio_sid": reply_sid,
                     "message_sid": inbound_message_sid,
                 }
             )
@@ -867,6 +922,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "message_sid": inbound_message_sid,
                 }
             )
+            _send_webhook_text_reply(sender, "Invalid passcode. Please try again.")
             return WebhookResponse(message="Invalid passcode. Please try again.")
 
         _private_access_challenges.pop(sender, None)
@@ -1026,6 +1082,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         return WebhookResponse(message="Stored files were missing. Please re-upload your document.")
 
     logger.info("Webhook no document match: sender=%s query=%s", sender, body)
+    no_match_sid = _send_webhook_text_reply(sender, "Document not found. Please refine your request.")
     request_logs.add(
         {
             "request_id": request.state.request_id,
@@ -1034,7 +1091,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             "query": body,
             "found": False,
             "doc_id": None,
-            "twilio_sid": None,
+            "twilio_sid": no_match_sid,
             "message_sid": inbound_message_sid,
         }
     )

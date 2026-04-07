@@ -41,33 +41,36 @@ def test_upload_missing_file_name(tmp_path: Path) -> None:
 
 
 def test_upload_missing_tags(tmp_path: Path) -> None:
-    """Test upload endpoint requires at least one tag."""
+    """Test upload endpoint auto-derives tags when tags are omitted."""
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
     response = client.post(
         "/upload",
-        data={"doc_category": "resume", "tags": ""},  # Empty tags
+        data={"doc_category": "resume", "tags": ""},
         files={"file": ("resume.pdf", b"content", "application/pdf")},
     )
 
-    assert response.status_code == 400
-    assert "At least one tag is required" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()["document"]
+    assert "resume" in payload["tags"]
 
 
 def test_upload_missing_tags_with_only_whitespace(tmp_path: Path) -> None:
-    """Test upload endpoint rejects tags that are only whitespace."""
+    """Test upload endpoint handles whitespace tags by using inferred metadata."""
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
     response = client.post(
         "/upload",
-        data={"doc_category": "resume", "tags": "   ,  ,   "},  # Only whitespace and commas
+        data={"doc_category": "", "tags": "   ,  ,   "},
         files={"file": ("resume.pdf", b"content", "application/pdf")},
     )
 
-    assert response.status_code == 400
-    assert "At least one tag is required" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()["document"]
+    assert payload["doc_category"] in {"general", "resume"}
+    assert len(payload["tags"]) >= 1
 
 
 def test_upload_unsupported_file_type(tmp_path: Path) -> None:
