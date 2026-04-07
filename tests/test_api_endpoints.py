@@ -141,3 +141,38 @@ def test_upload_keeps_specific_category_even_if_suggestion_exists(tmp_path: Path
     assert upload_response.status_code == 200
     uploaded = upload_response.json()["document"]
     assert uploaded["doc_category"] == "invoice"
+
+
+def test_private_upload_requires_access_code(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    upload_response = client.post(
+        "/upload",
+        data={"doc_category": "id", "tags": "pan", "is_private": "true"},
+        files={"file": ("pan_card.pdf", b"dummy-pdf-content", "application/pdf")},
+    )
+
+    assert upload_response.status_code == 400
+    assert "Private documents require an access_code" in upload_response.json()["detail"]
+
+
+def test_private_upload_sets_private_metadata(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    upload_response = client.post(
+        "/upload",
+        data={
+            "doc_category": "id",
+            "tags": "pan",
+            "is_private": "true",
+            "access_code": "1234",
+        },
+        files={"file": ("pan_card.pdf", b"dummy-pdf-content", "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()["document"]
+    assert uploaded["is_private"] is True
+    assert uploaded["access_code_hash"] is not None

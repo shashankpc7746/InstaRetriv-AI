@@ -40,6 +40,20 @@ def _add_test_document(client: TestClient) -> str:
     return response.json()["document"]["id"]
 
 
+def _add_private_test_document(client: TestClient, access_code: str = "1234") -> str:
+    response = client.post(
+        "/upload",
+        data={
+            "doc_category": "id",
+            "tags": "pan,identity",
+            "is_private": "true",
+            "access_code": access_code,
+        },
+        files={"file": ("pan_card_secret.pdf", b"dummy-private", "application/pdf")},
+    )
+    return response.json()["document"]["id"]
+
+
 def test_webhook_with_document_match(tmp_path: Path) -> None:
     """Test webhook successfully finds and matches a document."""
     _configure_test_state(tmp_path)
@@ -342,3 +356,69 @@ def test_delivery_summary_reports_success_rate(tmp_path: Path) -> None:
     assert summary["counts_by_state"]["delivered"] == 1
     assert summary["counts_by_state"]["failed"] == 1
     assert summary["counts_by_state"]["queued"] == 1
+
+
+def test_private_document_requires_passcode_challenge(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    private_doc_id = _add_private_test_document(client)
+
+    webhook_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "send my pan card",
+        },
+    )
+
+    assert webhook_response.status_code == 200
+    payload = webhook_response.json()
+    assert "private document" in payload["message"].lower()
+    assert payload.get("matched_document_id") is None
+
+    logs_response = client.get("/logs/recent", params={"limit": 30})
+    audit_logs = [
+        entry
+        for entry in logs_response.json()
+        if entry.get("type") == "private-access-audit" and entry.get("doc_id") == private_doc_id
+    ]
+    assert any(entry.get("status") == "challenge-issued" for entry in audit_logs)
+
+
+def test_private_document_access_denied_with_wrong_passcode(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    _add_private_test_document(client, access_code="7890")
+
+    webhook_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "send my pan card code 0000",
+        },
+    )
+
+    assert webhook_response.status_code == 200
+    assert "Invalid passcode" in webhook_response.json()["message"]
+
+
+def test_private_document_access_granted_with_inline_passcode(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    private_doc_id = _add_private_test_document(client, access_code="2468")
+
+    webhook_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "send my pan card code 2468",
+        },
+    )
+
+    assert webhook_response.status_code == 200
+    payload = webhook_response.json()
+    assert payload["matched_document_id"] == private_doc_id
+    assert "Document found" in payload["message"]
