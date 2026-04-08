@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.config import settings
+from app.profile_settings_repository import ProfileSettingsRepository
 from app.repository import MetadataRepository
 from app.request_log_repository import RequestLogRepository
 from app.services.storage import LocalStorageService
@@ -20,14 +21,27 @@ def _configure_test_state(tmp_path: Path) -> None:
     upload_dir = tmp_path / "uploads"
     metadata_file = tmp_path / "metadata.json"
     request_log_file = tmp_path / "request_logs.json"
+    profile_settings_file = tmp_path / "profile_settings.json"
 
     main_module.repository = MetadataRepository(str(metadata_file))
     main_module.request_logs = RequestLogRepository(str(request_log_file))
     main_module.storage_service = LocalStorageService(str(upload_dir))
+    main_module.profile_settings_repo = ProfileSettingsRepository(str(profile_settings_file))
     main_module.whatsapp_sender = WhatsAppSender(account_sid="", auth_token="", sender="")
     main_module.settings.require_twilio_signature = False
     main_module.settings.authorized_senders = ""
     main_module.settings.public_base_url = ""
+
+
+def _set_private_access_code(client: TestClient, code: str = "1234") -> None:
+    response = client.post(
+        "/profile/private-access-code",
+        data={
+            "private_access_code": code,
+            "confirm_private_access_code": code,
+        },
+    )
+    assert response.status_code == 200
 
 
 def _add_test_document(client: TestClient) -> str:
@@ -40,17 +54,17 @@ def _add_test_document(client: TestClient) -> str:
     return response.json()["document"]["id"]
 
 
-def _add_private_test_document(client: TestClient, access_code: str = "1234") -> str:
+def _add_private_test_document(client: TestClient) -> str:
     response = client.post(
         "/upload",
         data={
             "doc_category": "id",
             "tags": "pan,identity",
             "is_private": "true",
-            "access_code": access_code,
         },
         files={"file": ("pan_card_secret.pdf", b"dummy-private", "application/pdf")},
     )
+    assert response.status_code == 200
     return response.json()["document"]["id"]
 
 
@@ -361,6 +375,7 @@ def test_delivery_summary_reports_success_rate(tmp_path: Path) -> None:
 def test_private_document_requires_passcode_challenge(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
+    _set_private_access_code(client)
 
     private_doc_id = _add_private_test_document(client)
 
@@ -389,8 +404,9 @@ def test_private_document_requires_passcode_challenge(tmp_path: Path) -> None:
 def test_private_document_access_denied_with_wrong_passcode(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
+    _set_private_access_code(client, code="7890")
 
-    _add_private_test_document(client, access_code="7890")
+    _add_private_test_document(client)
 
     webhook_response = client.post(
         "/webhook",
@@ -407,8 +423,9 @@ def test_private_document_access_denied_with_wrong_passcode(tmp_path: Path) -> N
 def test_private_document_access_granted_with_inline_passcode(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
+    _set_private_access_code(client, code="2468")
 
-    private_doc_id = _add_private_test_document(client, access_code="2468")
+    private_doc_id = _add_private_test_document(client)
 
     webhook_response = client.post(
         "/webhook",

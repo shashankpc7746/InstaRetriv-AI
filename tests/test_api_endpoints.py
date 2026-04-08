@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.profile_settings_repository import ProfileSettingsRepository
 from app.repository import MetadataRepository
 from app.request_log_repository import RequestLogRepository
 from app.services.storage import LocalStorageService
@@ -12,10 +13,12 @@ def _configure_test_state(tmp_path: Path) -> None:
     upload_dir = tmp_path / "uploads"
     metadata_file = tmp_path / "metadata.json"
     request_log_file = tmp_path / "request_logs.json"
+    profile_settings_file = tmp_path / "profile_settings.json"
 
     main_module.repository = MetadataRepository(str(metadata_file))
     main_module.request_logs = RequestLogRepository(str(request_log_file))
     main_module.storage_service = LocalStorageService(str(upload_dir))
+    main_module.profile_settings_repo = ProfileSettingsRepository(str(profile_settings_file))
 
 
 def test_setup_status_endpoint_has_expected_keys(tmp_path: Path) -> None:
@@ -154,12 +157,37 @@ def test_private_upload_requires_access_code(tmp_path: Path) -> None:
     )
 
     assert upload_response.status_code == 400
-    assert "Private documents require an access_code" in upload_response.json()["detail"]
+    assert "Set your profile private access code first" in upload_response.json()["detail"]
+
+
+def test_profile_private_access_code_can_be_set(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/profile/private-access-code",
+        data={
+            "private_access_code": "1234",
+            "confirm_private_access_code": "1234",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Private access code updated."
 
 
 def test_private_upload_sets_private_metadata(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
+
+    set_code_response = client.post(
+        "/profile/private-access-code",
+        data={
+            "private_access_code": "1234",
+            "confirm_private_access_code": "1234",
+        },
+    )
+    assert set_code_response.status_code == 200
 
     upload_response = client.post(
         "/upload",
@@ -167,7 +195,6 @@ def test_private_upload_sets_private_metadata(tmp_path: Path) -> None:
             "doc_category": "id",
             "tags": "pan",
             "is_private": "true",
-            "access_code": "1234",
         },
         files={"file": ("pan_card.pdf", b"dummy-pdf-content", "application/pdf")},
     )
@@ -175,4 +202,4 @@ def test_private_upload_sets_private_metadata(tmp_path: Path) -> None:
     assert upload_response.status_code == 200
     uploaded = upload_response.json()["document"]
     assert uploaded["is_private"] is True
-    assert uploaded["access_code_hash"] is not None
+    assert uploaded["access_code_hash"] is None
