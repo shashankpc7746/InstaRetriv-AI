@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     cloudinary_api_secret: str = ""
     metadata_file: str = "data/metadata.json"
     request_log_file: str = "data/request_logs.json"
+    profile_settings_file: str = "data/profile_settings.json"
 
     metadata_backend: str = "json"
     mongodb_uri: str = ""

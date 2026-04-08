@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, Redirect
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import settings
+from app.profile_settings_repository import ProfileSettingsRepository
 from app.request_log_repository import RequestLogRepository
 from app.repository import MetadataRepository
 from app.repository_mongo import MongoMetadataRepository
@@ -49,6 +50,7 @@ def create_metadata_repository():
 
 repository = create_metadata_repository()
 request_logs = RequestLogRepository(settings.request_log_file)
+profile_settings_repo = ProfileSettingsRepository(settings.profile_settings_file)
 
 _RECENT_MESSAGE_SIDS_LIMIT = 1000
 _recent_message_sids_queue: deque[str] = deque()
@@ -299,10 +301,27 @@ def _hash_access_code(access_code: str) -> str:
     return sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _get_private_access_code_hash() -> str | None:
+    return profile_settings_repo.get_private_access_code_hash()
+
+
+def _private_access_code_configured() -> bool:
+    return bool(_get_private_access_code_hash())
+
+
 def _verify_access_code(document: DocumentMetadata, access_code: str) -> bool:
-    if not document.access_code_hash:
-        return False
-    return compare_digest(document.access_code_hash, _hash_access_code(access_code))
+    submitted_hash = _hash_access_code(access_code)
+
+    # Primary path: single global private code.
+    global_hash = _get_private_access_code_hash()
+    if global_hash and compare_digest(global_hash, submitted_hash):
+        return True
+
+    # Backward compatibility for previously uploaded per-document private codes.
+    if document.access_code_hash and compare_digest(document.access_code_hash, submitted_hash):
+        return True
+
+    return False
 
 
 def _extract_access_code_from_message(body: str) -> str | None:
@@ -382,14 +401,23 @@ def upload_form():
             code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
             .checkbox-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
             .checkbox-row input[type='checkbox'] { width: auto; margin: 0; }
-            .private-fields { display: none; background: #fff7e6; border: 1px solid #f2c97d; padding: 12px; border-radius: 6px; margin-top: 12px; }
-            .private-fields.active { display: block; }
             .hint { color: #555; font-size: 14px; margin-top: 4px; }
+            .profile-box { background: #eef7ee; border: 1px solid #b9d9b9; padding: 14px; border-radius: 8px; margin-bottom: 20px; }
         </style>
     </head>
     <body>
         <div class="container">
             <h1>📄 InstaRetriv AI - Document Manager</h1>
+
+            <div class="profile-box">
+                <h2>🔐 Profile Security</h2>
+                <p class="hint">Set one private access code for all private documents.</p>
+                <form method="post" action="/profile/private-access-code">
+                    <input type="password" name="private_access_code" minlength="4" placeholder="New private access code" required>
+                    <input type="password" name="confirm_private_access_code" minlength="4" placeholder="Confirm private access code" required>
+                    <button type="submit">Set or Change Private Access Code</button>
+                </form>
+            </div>
             
             <div class="section">
                 <h2>Upload Document</h2>
@@ -402,12 +430,7 @@ def upload_form():
                         <input type="checkbox" id="is_private" name="is_private" value="true">
                         <label for="is_private"><strong>Mark as private document</strong> (Phase 14 Secure Vault)</label>
                     </div>
-
-                    <div id="private-fields" class="private-fields">
-                        <label for="access_code"><strong>Access code</strong> (minimum 4 characters)</label>
-                        <input type="password" id="access_code" name="access_code" minlength="4" placeholder="Enter access code for this document">
-                        <div class="hint">Private docs require this code in WhatsApp retrieval, e.g. <code>code 1234</code>.</div>
-                    </div>
+                    <div class="hint">Private docs use your single profile-level private access code during WhatsApp retrieval, e.g. <code>code 1234</code>.</div>
 
                     <div class="hint">Phase 13: Tags are auto-enriched from filename and category can be auto-suggested if you choose a generic category.</div>
                     <button type="submit">Upload Document</button>
@@ -437,27 +460,12 @@ def upload_form():
         </div>
         <script>
             const privateToggle = document.getElementById('is_private');
-            const privateFields = document.getElementById('private-fields');
-            const accessCodeInput = document.getElementById('access_code');
-
-            function syncPrivateUI() {
-                const enabled = privateToggle && privateToggle.checked;
-                if (!privateFields || !accessCodeInput) {
-                    return;
-                }
-                if (enabled) {
-                    privateFields.classList.add('active');
-                    accessCodeInput.required = true;
-                } else {
-                    privateFields.classList.remove('active');
-                    accessCodeInput.required = false;
-                    accessCodeInput.value = '';
-                }
-            }
-
             if (privateToggle) {
-                privateToggle.addEventListener('change', syncPrivateUI);
-                syncPrivateUI();
+                privateToggle.addEventListener('change', function () {
+                    if (privateToggle.checked) {
+                        alert('This file will require your global private access code during retrieval.');
+                    }
+                });
             }
         </script>
     </body>
@@ -473,6 +481,7 @@ def setup_status() -> dict[str, bool]:
         "twilio_auth_token_set": bool(settings.twilio_auth_token.strip()),
         "twilio_whatsapp_from_set": bool(settings.twilio_whatsapp_from.strip()),
         "twilio_sender_enabled": whatsapp_sender.enabled,
+        "private_access_code_set": _private_access_code_configured(),
         "public_base_url_set": bool(settings.public_base_url.strip()),
         "require_twilio_signature": settings.require_twilio_signature,
         "mongodb_uri_set": bool(settings.mongodb_uri.strip()),
@@ -489,7 +498,6 @@ async def upload_document(
     doc_category: str = Form(""),
     tags: str = Form(""),
     is_private: bool = Form(False),
-    access_code: str | None = Form(None),
 ) -> UploadResponse:
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required.")
@@ -515,12 +523,12 @@ async def upload_document(
     ):
         final_category = suggested_category
 
-    access_code_hash = None
     if is_private:
-        normalized_access_code = (access_code or "").strip()
-        if len(normalized_access_code) < 4:
-            raise HTTPException(status_code=400, detail="Private documents require an access_code with at least 4 characters.")
-        access_code_hash = _hash_access_code(normalized_access_code)
+        if not _private_access_code_configured():
+            raise HTTPException(
+                status_code=400,
+                detail="Set your profile private access code first from /profile/private-access-code before uploading private documents.",
+            )
 
     storage_path = await storage_service.save(file)
     document = DocumentMetadata(
@@ -530,7 +538,7 @@ async def upload_document(
         tags=final_tags,
         storage_path=storage_path,
         is_private=is_private,
-        access_code_hash=access_code_hash,
+        access_code_hash=None,
     )
 
     repository.add(document)
@@ -551,6 +559,31 @@ async def upload_document(
     )
 
     return UploadResponse(message="Upload successful", document=document)
+
+
+@app.post("/profile/private-access-code")
+async def set_private_access_code(
+    request: Request,
+    private_access_code: str = Form(...),
+    confirm_private_access_code: str = Form(...),
+) -> dict[str, str]:
+    normalized = private_access_code.strip()
+    confirm = confirm_private_access_code.strip()
+
+    if len(normalized) < 4:
+        raise HTTPException(status_code=400, detail="Private access code must be at least 4 characters.")
+    if normalized != confirm:
+        raise HTTPException(status_code=400, detail="Private access code and confirmation do not match.")
+
+    profile_settings_repo.set_private_access_code_hash(_hash_access_code(normalized))
+    request_logs.add(
+        {
+            "request_id": request.state.request_id,
+            "type": "profile-security",
+            "event": "private-access-code-updated",
+        }
+    )
+    return {"message": "Private access code updated."}
 
 
 @app.get("/get-document", response_model=RetrievalResult)
@@ -875,6 +908,21 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         result, stale_count = _resolve_best_retrievable_document(body)
 
     if result.found and result.document is not None and result.document.is_private:
+        if not _private_access_code_configured():
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": result.document.id,
+                    "status": "access-blocked",
+                    "reason": "private-code-not-configured",
+                    "message_sid": inbound_message_sid,
+                }
+            )
+            _send_webhook_text_reply(sender, "Private access code is not configured in profile settings.")
+            return WebhookResponse(message="Private access code is not configured in profile settings.")
+
         if not provided_access_code:
             if sender:
                 _private_access_challenges[sender] = {"doc_id": result.document.id, "attempts": 0}
