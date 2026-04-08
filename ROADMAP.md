@@ -277,8 +277,8 @@ Protect highly sensitive documents with extra verification.
 - Better protection for identity and financial files
 
 ### Next Checkpoints
-- Extend metadata schema with `is_private` and `access_code_hash` (completed)
-- Require OTP/passcode challenge for private-document retrieval in webhook flow (completed)
+- Add global profile-level private access code for all private documents (completed)
+- Keep private file toggle at upload and enforce passcode challenge in webhook flow (completed)
 - Add audit log entries for private-document access attempts (completed)
 
 ---
@@ -293,7 +293,7 @@ Track whether a WhatsApp delivery truly reached the user.
 
 ### Outcomes
 - Delivery callback logging
-- Better failure diagnostics
+- Better failure diagnosticsn dash
 - Clearer message lifecycle state
 
 ### Initial Implementation Completed
