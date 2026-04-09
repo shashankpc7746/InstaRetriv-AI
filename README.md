@@ -18,6 +18,8 @@ What v2.1 achieved after v2.0:
 - Temporary debug surfaces removed from public API
 - Documentation aligned with production behavior
 - Upload page now supports Phase 13 smart-tag helpers and Phase 14 private-document controls
+- Private documents now use one global profile-level passcode instead of per-file passwords
+- Upload dashboard refreshed with a more modern, mobile-friendly layout
 
 ## Project Status
 
@@ -40,7 +42,7 @@ The system is live and operational with:
 - Upload files with categories and tags
 - Auto-enrich uploaded tags from the filename
 - Suggest a category when the uploaded category is generic
-- Mark sensitive files as private with a passcode
+- Mark sensitive files as private and protect them with one profile-level passcode
 - Retrieve documents using conversational queries
 - Match by keywords, synonyms, and fuzzy scoring
 - Deliver files through WhatsApp
@@ -76,6 +78,7 @@ The system is live and operational with:
 - GET /
 - GET /health
 - GET /setup/status
+- POST /profile/private-access-code
 - POST /upload
 - GET /get-document
 - POST /webhook
@@ -211,6 +214,7 @@ python -m pytest -q
 - First fresh message after backend wake-up is processed (no forced warm-up-only drop).
 - The system sends a direct link only when WhatsApp media delivery fails.
 - The upload form now shows private-document controls and explains smart upload behavior.
+- The app now uses one private access code for all private documents, set from the profile security section.
 - Keep secrets rotated after validation.
 
 ## What v2.1 Solves
@@ -229,3 +233,12 @@ python -m pytest -q
 - Secure Vault Mode: extra verification for sensitive files
 - Retrieval Brain v2: smarter ranking that learns your query style
 - Control Hub: a compact command center for search, health, and document insights
+
+## Future Optimization Ideas
+
+Planned later when the core vault is stable:
+- Add login and session management for the dashboard
+- Support multiple users with isolated vaults and settings
+- Add OCR + semantic retrieval for full-document search
+- Add smarter access analytics and private-doc activity logs
+- Add confidence-based tag suggestions and user correction feedback
