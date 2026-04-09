@@ -21,6 +21,7 @@ from app.services.matcher import find_best_document
 from app.services.storage import CloudinaryStorageService, LocalStorageService, is_remote_storage_path
 from app.services.twilio_validation import is_valid_twilio_signature
 from app.services.whatsapp import WhatsAppSender
+from app.ui_templates import build_upload_page
 
 logging.basicConfig(
     level=logging.INFO,
@@ -309,16 +310,11 @@ def _private_access_code_configured() -> bool:
     return bool(_get_private_access_code_hash())
 
 
-def _verify_access_code(document: DocumentMetadata, access_code: str) -> bool:
+def _verify_access_code(access_code: str) -> bool:
     submitted_hash = _hash_access_code(access_code)
 
-    # Primary path: single global private code.
     global_hash = _get_private_access_code_hash()
     if global_hash and compare_digest(global_hash, submitted_hash):
-        return True
-
-    # Backward compatibility for previously uploaded per-document private codes.
-    if document.access_code_hash and compare_digest(document.access_code_hash, submitted_hash):
         return True
 
     return False
@@ -380,98 +376,7 @@ def health() -> dict[str, str]:
 @app.get("/")
 def upload_form():
     """Simple HTML form to upload documents."""
-    html_content = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>InstaRetriv AI - Upload Documents</title>
-        <style>
-            body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-            .container { background: #f5f5f5; padding: 30px; border-radius: 8px; }
-            h1 { color: #333; }
-            form { background: white; padding: 20px; border-radius: 8px; }
-            input, textarea { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-            button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-            button:hover { background: #0056b3; }
-            .info { background: #e7f3ff; padding: 15px; margin: 20px 0; border-radius: 4px; }
-            .section { margin: 30px 0; }
-            a { color: #007bff; text-decoration: none; }
-            a:hover { text-decoration: underline; }
-            .link-list { background: white; padding: 15px; border-radius: 4px; margin: 10px 0; }
-            code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
-            .checkbox-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-            .checkbox-row input[type='checkbox'] { width: auto; margin: 0; }
-            .hint { color: #555; font-size: 14px; margin-top: 4px; }
-            .profile-box { background: #eef7ee; border: 1px solid #b9d9b9; padding: 14px; border-radius: 8px; margin-bottom: 20px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>📄 InstaRetriv AI - Document Manager</h1>
-
-            <div class="profile-box">
-                <h2>🔐 Profile Security</h2>
-                <p class="hint">Set one private access code for all private documents.</p>
-                <form method="post" action="/profile/private-access-code">
-                    <input type="password" name="private_access_code" minlength="4" placeholder="New private access code" required>
-                    <input type="password" name="confirm_private_access_code" minlength="4" placeholder="Confirm private access code" required>
-                    <button type="submit">Set or Change Private Access Code</button>
-                </form>
-            </div>
-            
-            <div class="section">
-                <h2>Upload Document</h2>
-                <form method="post" action="/upload" enctype="multipart/form-data">
-                    <input type="file" name="file" required accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.webp">
-                    <input type="text" name="doc_category" placeholder="Category (optional: e.g., resume, certificate)">
-                    <textarea name="tags" placeholder="Tags (optional, comma-separated: e.g., resume, pdf, work)"></textarea>
-
-                    <div class="checkbox-row">
-                        <input type="checkbox" id="is_private" name="is_private" value="true">
-                        <label for="is_private"><strong>Mark as private document</strong> (Phase 14 Secure Vault)</label>
-                    </div>
-                    <div class="hint">Private docs use your single profile-level private access code during WhatsApp retrieval, e.g. <code>code 1234</code>.</div>
-
-                    <div class="hint">Phase 13: Tags are auto-enriched from filename and category can be auto-suggested if you choose a generic category.</div>
-                    <button type="submit">Upload Document</button>
-                </form>
-            </div>
-
-            <div class="info">
-                <strong>📝 Tips:</strong>
-                <ul>
-                    <li>Use <strong>clear, descriptive tags</strong> for better search results</li>
-                    <li>Examples: "resume", "cover letter", "pan card", "aadhar", "invoice"</li>
-                    <li>Tags are case-insensitive and support partial matching</li>
-                </ul>
-            </div>
-
-            <div class="section">
-                <h2>🤖 WhatsApp Integration</h2>
-                <div class="info">
-                    <p>Send a WhatsApp message to your Twilio Sandbox with a query like:</p>
-                    <ul>
-                        <li>"send my resume"</li>
-                        <li>"pan card"</li>
-                        <li>"aadhar certificate"</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-        <script>
-            const privateToggle = document.getElementById('is_private');
-            if (privateToggle) {
-                privateToggle.addEventListener('change', function () {
-                    if (privateToggle.checked) {
-                        alert('This file will require your global private access code during retrieval.');
-                    }
-                });
-            }
-        </script>
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=build_upload_page())
 
 
 @app.get("/setup/status")
@@ -538,7 +443,6 @@ async def upload_document(
         tags=final_tags,
         storage_path=storage_path,
         is_private=is_private,
-        access_code_hash=None,
     )
 
     repository.add(document)
@@ -864,7 +768,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "Reply with your passcode (for example: code 1234)."
                 )
             )
-        elif _verify_access_code(challenged_document, provided_access_code):
+        elif _verify_access_code(provided_access_code):
             _private_access_challenges.pop(sender, None)
             request_logs.add(
                 {
@@ -954,7 +858,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 )
             )
 
-        if not _verify_access_code(result.document, provided_access_code):
+        if not _verify_access_code(provided_access_code):
             if sender:
                 _private_access_challenges[sender] = {"doc_id": result.document.id, "attempts": 1}
 
