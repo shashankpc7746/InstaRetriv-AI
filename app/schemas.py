@@ -13,7 +13,6 @@ class DocumentMetadata(BaseModel):
     tags: list[str]
     storage_path: str
     is_private: bool = False
-    access_code_hash: Optional[str] = None
     uploaded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
 
