@@ -1,8 +1,10 @@
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.services.whatsapp import WhatsAppSender
 from app.profile_settings_repository import ProfileSettingsRepository
 from app.repository import MetadataRepository
 from app.request_log_repository import RequestLogRepository
@@ -19,6 +21,10 @@ def _configure_test_state(tmp_path: Path) -> None:
     main_module.request_logs = RequestLogRepository(str(request_log_file))
     main_module.storage_service = LocalStorageService(str(upload_dir))
     main_module.profile_settings_repo = ProfileSettingsRepository(str(profile_settings_file))
+    main_module.whatsapp_sender = WhatsAppSender(account_sid="", auth_token="", sender="")
+    main_module.settings.require_twilio_signature = False
+    main_module.settings.authorized_senders = ""
+    main_module.settings.public_base_url = ""
 
 
 def test_setup_status_endpoint_has_expected_keys(tmp_path: Path) -> None:
@@ -202,4 +208,41 @@ def test_private_upload_sets_private_metadata(tmp_path: Path) -> None:
     assert upload_response.status_code == 200
     uploaded = upload_response.json()["document"]
     assert uploaded["is_private"] is True
-    assert uploaded["access_code_hash"] is None
+    assert "access_code_hash" not in uploaded
+
+
+def test_legacy_per_document_private_code_is_ignored(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    set_code_response = client.post(
+        "/profile/private-access-code",
+        data={
+            "private_access_code": "2468",
+            "confirm_private_access_code": "2468",
+        },
+    )
+    assert set_code_response.status_code == 200
+
+    upload_response = client.post(
+        "/upload",
+        data={"doc_category": "id", "tags": "pan", "is_private": "true"},
+        files={"file": ("pan_card.pdf", b"dummy-pdf-content", "application/pdf")},
+    )
+    assert upload_response.status_code == 200
+
+    metadata_path = tmp_path / "metadata.json"
+    data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    data[0]["access_code_hash"] = "legacy-hash-value"
+    metadata_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    denial_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "send my pan card code 1111",
+        },
+    )
+
+    assert denial_response.status_code == 200
+    assert "Invalid passcode" in denial_response.json()["message"]
