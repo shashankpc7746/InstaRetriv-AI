@@ -272,7 +272,7 @@ In Progress
 Protect highly sensitive documents with extra verification.
 
 ### Outcomes
-- Optional passcode for private documents
+- Optional private-document flag with one global profile-level passcode
 - Controlled access over WhatsApp
 - Better protection for identity and financial files
 
@@ -280,6 +280,22 @@ Protect highly sensitive documents with extra verification.
 - Add global profile-level private access code for all private documents (completed)
 - Keep private file toggle at upload and enforce passcode challenge in webhook flow (completed)
 - Add audit log entries for private-document access attempts (completed)
+
+---
+
+## Future Optimization Backlog
+
+### Goal
+Make the app more flexible, more usable, and less manual as it grows.
+
+### Ideas to Prioritize Later
+- Add login and account management so only authorized users can access the dashboard
+- Support multi-user vaults with per-user isolation for documents and settings
+- Add OCR and semantic retrieval so uploads become searchable by document content
+- Add a richer dashboard with activity feed, access timeline, and quick actions
+- Add stronger security options like OTP, device trust, and session locking
+- Add smarter auto-tagging with confidence scoring and user correction feedback
+- Add usage analytics and delivery health indicators to spot failures faster
 
 ---
 
