@@ -23,6 +23,7 @@ def _configure_test_state(tmp_path: Path) -> None:
     main_module.storage_service = LocalStorageService(str(upload_dir))
     main_module.settings.require_twilio_signature = False
     main_module.settings.authorized_senders = ""
+    main_module.settings.dashboard_auth_enabled = False
 
 
 def test_upload_missing_file_name(tmp_path: Path) -> None:

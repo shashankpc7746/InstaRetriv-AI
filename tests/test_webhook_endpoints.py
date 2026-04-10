@@ -31,6 +31,7 @@ def _configure_test_state(tmp_path: Path) -> None:
     main_module.settings.require_twilio_signature = False
     main_module.settings.authorized_senders = ""
     main_module.settings.public_base_url = ""
+    main_module.settings.dashboard_auth_enabled = False
 
 
 def _set_private_access_code(client: TestClient, code: str = "1234") -> None:
