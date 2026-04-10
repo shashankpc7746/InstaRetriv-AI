@@ -1,5 +1,7 @@
 import logging
 import re
+import secrets
+import time
 from hashlib import sha256
 from hmac import compare_digest
 from collections import Counter, deque
@@ -57,6 +59,9 @@ _RECENT_MESSAGE_SIDS_LIMIT = 1000
 _recent_message_sids_queue: deque[str] = deque()
 _recent_message_sids_set: set[str] = set()
 _private_access_challenges: dict[str, dict[str, int | str]] = {}
+_dashboard_sessions: dict[str, float] = {}
+
+_DASHBOARD_SESSION_COOKIE = "instaretriv_session"
 
 _TERMINAL_DELIVERY_STATES = {"delivered", "read", "failed", "undelivered", "canceled"}
 
@@ -297,6 +302,39 @@ def _send_webhook_text_reply(sender: str, body: str) -> str | None:
     return whatsapp_sender.send_text(to_number=sender, body=body)
 
 
+def _dashboard_auth_enabled() -> bool:
+    return settings.dashboard_auth_enabled
+
+
+def _new_dashboard_session_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _is_dashboard_authenticated(request: Request) -> bool:
+    if not _dashboard_auth_enabled():
+        return True
+
+    token = (request.cookies.get(_DASHBOARD_SESSION_COOKIE) or "").strip()
+    if not token:
+        return False
+
+    issued_at = _dashboard_sessions.get(token)
+    if not issued_at:
+        return False
+
+    ttl_seconds = max(1, settings.dashboard_session_ttl_minutes) * 60
+    if (time.time() - issued_at) > ttl_seconds:
+        _dashboard_sessions.pop(token, None)
+        return False
+
+    return True
+
+
+def _require_dashboard_auth(request: Request) -> None:
+    if not _is_dashboard_authenticated(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+
 def _hash_access_code(access_code: str) -> str:
     normalized = access_code.strip()
     return sha256(normalized.encode("utf-8")).hexdigest()
@@ -373,9 +411,84 @@ def health() -> dict[str, str]:
     return {"status": "ok", "app": settings.app_name, "env": settings.app_env}
 
 
+@app.get("/login")
+def login_page(request: Request):
+    if _is_dashboard_authenticated(request):
+        return RedirectResponse(url="/")
+
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>InstaRetriv AI - Login</title>
+        <style>
+            body { font-family: Segoe UI, Arial, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f7fb; }
+            .card { width: min(92vw, 420px); background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
+            h1 { margin: 0 0 14px; font-size: 1.35rem; }
+            p { color: #64748b; margin: 0 0 14px; }
+            form { display: grid; gap: 10px; }
+            input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+            button { border: none; border-radius: 8px; background: #0f62fe; color: white; font-weight: 700; padding: 11px 14px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>Login</h1>
+            <p>Sign in to access the InstaRetriv dashboard.</p>
+            <form method="post" action="/login">
+                <input type="text" name="username" placeholder="Username" required>
+                <input type="password" name="password" placeholder="Password" required>
+                <button type="submit">Sign In</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+
+@app.post("/login")
+async def login_submit(
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    if not _dashboard_auth_enabled():
+        return RedirectResponse(url="/", status_code=303)
+
+    if username.strip() != settings.dashboard_username or password != settings.dashboard_password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = _new_dashboard_session_token()
+    _dashboard_sessions[token] = time.time()
+    ttl_seconds = max(1, settings.dashboard_session_ttl_minutes) * 60
+
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        key=_DASHBOARD_SESSION_COOKIE,
+        value=token,
+        max_age=ttl_seconds,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/logout")
+def logout(request: Request):
+    token = (request.cookies.get(_DASHBOARD_SESSION_COOKIE) or "").strip()
+    if token:
+        _dashboard_sessions.pop(token, None)
+
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(_DASHBOARD_SESSION_COOKIE)
+    return response
+
+
 @app.get("/")
-def upload_form():
+def upload_form(request: Request):
     """Simple HTML form to upload documents."""
+    if _dashboard_auth_enabled() and not _is_dashboard_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
     return HTMLResponse(content=build_upload_page())
 
 
@@ -387,6 +500,7 @@ def setup_status() -> dict[str, bool]:
         "twilio_whatsapp_from_set": bool(settings.twilio_whatsapp_from.strip()),
         "twilio_sender_enabled": whatsapp_sender.enabled,
         "private_access_code_set": _private_access_code_configured(),
+        "dashboard_auth_enabled": _dashboard_auth_enabled(),
         "public_base_url_set": bool(settings.public_base_url.strip()),
         "require_twilio_signature": settings.require_twilio_signature,
         "mongodb_uri_set": bool(settings.mongodb_uri.strip()),
@@ -404,6 +518,8 @@ async def upload_document(
     tags: str = Form(""),
     is_private: bool = Form(False),
 ) -> UploadResponse:
+    _require_dashboard_auth(request)
+
     if not file.filename:
         raise HTTPException(status_code=400, detail="File name is required.")
 
@@ -471,6 +587,8 @@ async def set_private_access_code(
     private_access_code: str = Form(...),
     confirm_private_access_code: str = Form(...),
 ) -> dict[str, str]:
+    _require_dashboard_auth(request)
+
     normalized = private_access_code.strip()
     confirm = confirm_private_access_code.strip()
 
@@ -513,12 +631,15 @@ def get_document(query: str, request: Request) -> RetrievalResult:
 
 
 @app.get("/documents", response_model=list[DocumentMetadata])
-def list_documents(active_only: bool = True) -> list[DocumentMetadata]:
+def list_documents(request: Request, active_only: bool = True) -> list[DocumentMetadata]:
+    _require_dashboard_auth(request)
     return repository.list_active() if active_only else repository.list_all()
 
 
 @app.delete("/documents/{document_id}")
 def archive_document(document_id: str, request: Request) -> dict[str, str]:
+    _require_dashboard_auth(request)
+
     archived = repository.deactivate(document_id)
     if not archived:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -550,14 +671,18 @@ def serve_document_file(document_id: str):
 
 
 @app.get("/logs/recent")
-def recent_logs(limit: int = 20) -> list[dict]:
+def recent_logs(request: Request, limit: int = 20) -> list[dict]:
+    _require_dashboard_auth(request)
+
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
     return request_logs.latest(limit=limit)
 
 
 @app.get("/logs/delivery")
-def recent_delivery_logs(limit: int = 20) -> list[dict]:
+def recent_delivery_logs(request: Request, limit: int = 20) -> list[dict]:
+    _require_dashboard_auth(request)
+
     if limit < 1 or limit > 200:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
 
@@ -602,7 +727,9 @@ def recent_delivery_logs(limit: int = 20) -> list[dict]:
 
 
 @app.get("/logs/delivery/summary")
-def delivery_summary(limit: int = 200) -> dict:
+def delivery_summary(request: Request, limit: int = 200) -> dict:
+    _require_dashboard_auth(request)
+
     if limit < 1 or limit > 2000:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 2000")
 
