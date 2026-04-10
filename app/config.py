@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     public_base_url: str = ""
     require_twilio_signature: bool = False
 
+    dashboard_auth_enabled: bool = False
+    dashboard_username: str = "admin"
+    dashboard_password: str = "admin123"
+    dashboard_session_ttl_minutes: int = 720
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
