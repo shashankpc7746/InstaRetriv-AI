@@ -373,10 +373,9 @@ def test_delivery_summary_reports_success_rate(tmp_path: Path) -> None:
     assert summary["counts_by_state"]["queued"] == 1
 
 
-def test_private_document_requires_passcode_challenge(tmp_path: Path) -> None:
+def test_private_document_requires_yes_confirmation(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
-    _set_private_access_code(client)
 
     private_doc_id = _add_private_test_document(client)
 
@@ -391,6 +390,7 @@ def test_private_document_requires_passcode_challenge(tmp_path: Path) -> None:
     assert webhook_response.status_code == 200
     payload = webhook_response.json()
     assert "private document" in payload["message"].lower()
+    assert "Reply 'YES'" in payload["message"]
     assert payload.get("matched_document_id") is None
 
     logs_response = client.get("/logs/recent", params={"limit": 30})
@@ -402,10 +402,9 @@ def test_private_document_requires_passcode_challenge(tmp_path: Path) -> None:
     assert any(entry.get("status") == "challenge-issued" for entry in audit_logs)
 
 
-def test_private_document_access_denied_with_wrong_passcode(tmp_path: Path) -> None:
+def test_private_document_pending_challenge_repeats_until_yes(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
-    _set_private_access_code(client, code="7890")
 
     _add_private_test_document(client)
 
@@ -413,26 +412,45 @@ def test_private_document_access_denied_with_wrong_passcode(tmp_path: Path) -> N
         "/webhook",
         data={
             "From": "whatsapp:+12345678901",
-            "Body": "send my pan card code 0000",
+            "Body": "send my pan card",
+        },
+    )
+    assert webhook_response.status_code == 200
+    assert "Reply 'YES'" in webhook_response.json()["message"]
+
+    not_yes_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "ok send",
         },
     )
 
-    assert webhook_response.status_code == 200
-    assert "Invalid passcode" in webhook_response.json()["message"]
+    assert not_yes_response.status_code == 200
+    assert "Pending private access" in not_yes_response.json()["message"]
 
 
-def test_private_document_access_granted_with_inline_passcode(tmp_path: Path) -> None:
+def test_private_document_access_granted_with_yes_confirmation(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
-    _set_private_access_code(client, code="2468")
 
     private_doc_id = _add_private_test_document(client)
+
+    challenge_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "send my pan card",
+        },
+    )
+    assert challenge_response.status_code == 200
+    assert "Reply 'YES'" in challenge_response.json()["message"]
 
     webhook_response = client.post(
         "/webhook",
         data={
             "From": "whatsapp:+12345678901",
-            "Body": "send my pan card code 2468",
+            "Body": "yes",
         },
     )
 
