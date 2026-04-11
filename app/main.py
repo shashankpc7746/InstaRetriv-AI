@@ -3,7 +3,6 @@ import re
 import secrets
 import time
 from hashlib import sha256
-from hmac import compare_digest
 from collections import Counter, deque
 from pathlib import Path
 from uuid import uuid4
@@ -62,6 +61,7 @@ _private_access_challenges: dict[str, dict[str, int | str]] = {}
 _dashboard_sessions: dict[str, float] = {}
 
 _DASHBOARD_SESSION_COOKIE = "instaretriv_session"
+_PRIVATE_CONFIRM_REPLY = "yes"
 
 _TERMINAL_DELIVERY_STATES = {"delivered", "read", "failed", "undelivered", "canceled"}
 
@@ -302,6 +302,27 @@ def _send_webhook_text_reply(sender: str, body: str) -> str | None:
     return whatsapp_sender.send_text(to_number=sender, body=body)
 
 
+def _is_private_confirmation_reply(body: str) -> bool:
+    normalized = (body or "").strip().lower()
+    return normalized in {"yes", "y", "ok", "confirm"}
+
+
+def _sanitize_query_for_logs(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+
+    cleaned = re.sub(
+        r"(?:passcode|code|pin|otp)\s*[:\-]?\s*[a-zA-Z0-9]{4,16}",
+        "[REDACTED_SECRET]",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if re.fullmatch(r"\d{4,10}", cleaned):
+        return "[REDACTED_TOKEN]"
+    return cleaned
+
+
 def _dashboard_auth_enabled() -> bool:
     return settings.dashboard_auth_enabled
 
@@ -346,31 +367,6 @@ def _get_private_access_code_hash() -> str | None:
 
 def _private_access_code_configured() -> bool:
     return bool(_get_private_access_code_hash())
-
-
-def _verify_access_code(access_code: str) -> bool:
-    submitted_hash = _hash_access_code(access_code)
-
-    global_hash = _get_private_access_code_hash()
-    if global_hash and compare_digest(global_hash, submitted_hash):
-        return True
-
-    return False
-
-
-def _extract_access_code_from_message(body: str) -> str | None:
-    text = (body or "").strip()
-    if not text:
-        return None
-
-    match = re.search(r"(?:passcode|code|pin|otp)\s*[:\-]?\s*([a-zA-Z0-9]{4,16})", text, re.IGNORECASE)
-    if match:
-        return match.group(1)
-
-    if re.fullmatch(r"[a-zA-Z0-9]{4,16}", text):
-        return text
-
-    return None
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -545,11 +541,8 @@ async def upload_document(
         final_category = suggested_category
 
     if is_private:
-        if not _private_access_code_configured():
-            raise HTTPException(
-                status_code=400,
-                detail="Set your profile private access code first from /profile/private-access-code before uploading private documents.",
-            )
+        # Private documents are confirmed via short-lived WhatsApp "YES" step.
+        pass
 
     storage_path = await storage_service.save(file)
     document = DocumentMetadata(
@@ -781,6 +774,7 @@ def delivery_summary(request: Request, limit: int = 200) -> dict:
 async def whatsapp_webhook(request: Request) -> WebhookResponse:
     form = await request.form()
     body = str(form.get("Body", ""))
+    safe_body = _sanitize_query_for_logs(body)
     sender = str(form.get("From", ""))
     inbound_message_sid = str(form.get("MessageSid") or form.get("SmsMessageSid") or "").strip()
 
@@ -796,7 +790,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 "request_id": request.state.request_id,
                 "type": "webhook",
                 "sender": sender,
-                "query": body,
+                "query": safe_body,
                 "found": False,
                 "doc_id": None,
                 "twilio_sid": None,
@@ -844,7 +838,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "request_id": request.state.request_id,
                     "type": "webhook",
                     "sender": sender,
-                    "query": body,
+                    "query": safe_body,
                     "found": False,
                     "doc_id": None,
                     "twilio_sid": None,
@@ -859,22 +853,39 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         _send_webhook_text_reply(sender, "Unauthorized sender.")
         return WebhookResponse(message="Unauthorized sender.")
 
-    provided_access_code = _extract_access_code_from_message(body)
+    is_confirmation_reply = _is_private_confirmation_reply(body)
     result: RetrievalResult | None = None
     stale_count = 0
     sender_challenge = _private_access_challenges.get(sender)
     if sender and sender_challenge:
         challenged_doc_id = str(sender_challenge.get("doc_id") or "")
+        expires_at = int(sender_challenge.get("expires_at") or 0)
         challenged_document = repository.get_by_id(challenged_doc_id) if challenged_doc_id else None
+        now_ts = int(time.time())
 
         if challenged_document is None or not challenged_document.is_active or not challenged_document.is_private:
             _private_access_challenges.pop(sender, None)
-        elif not provided_access_code:
+        elif now_ts > expires_at:
+            _private_access_challenges.pop(sender, None)
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": challenged_document.id,
+                    "status": "challenge-expired",
+                    "reason": "timeout",
+                    "message_sid": inbound_message_sid,
+                }
+            )
+            _send_webhook_text_reply(sender, "Private confirmation expired. Please request your private file again.")
+            return WebhookResponse(message="Private confirmation expired. Please request your private file again.")
+        elif not is_confirmation_reply:
             reply_sid = _send_webhook_text_reply(
                 sender,
                 (
                     f"Pending private access for {challenged_document.file_name}. "
-                    "Reply with your passcode (for example: code 1234)."
+                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
                 ),
             )
             request_logs.add(
@@ -884,7 +895,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "sender": sender,
                     "doc_id": challenged_document.id,
                     "status": "challenge-pending",
-                    "reason": "missing-passcode",
+                    "reason": "confirmation-required",
                     "twilio_sid": reply_sid,
                     "message_sid": inbound_message_sid,
                 }
@@ -892,10 +903,10 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             return WebhookResponse(
                 message=(
                     f"Pending private access for {challenged_document.file_name}. "
-                    "Reply with your passcode (for example: code 1234)."
+                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
                 )
             )
-        elif _verify_access_code(provided_access_code):
+        else:
             _private_access_challenges.pop(sender, None)
             request_logs.add(
                 {
@@ -904,65 +915,29 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "sender": sender,
                     "doc_id": challenged_document.id,
                     "status": "access-granted",
-                    "reason": "challenge-response",
+                    "reason": "yes-confirmation",
                     "message_sid": inbound_message_sid,
                 }
             )
             result = RetrievalResult(found=True, document=challenged_document, score=999.0)
             stale_count = 0
-        else:
-            attempts = int(sender_challenge.get("attempts") or 0) + 1
-            sender_challenge["attempts"] = attempts
-            _private_access_challenges[sender] = sender_challenge
-            if attempts >= 3:
-                _private_access_challenges.pop(sender, None)
-
-            request_logs.add(
-                {
-                    "request_id": request.state.request_id,
-                    "type": "private-access-audit",
-                    "sender": sender,
-                    "doc_id": challenged_document.id,
-                    "status": "access-denied",
-                    "reason": "invalid-passcode",
-                    "attempt": attempts,
-                    "message_sid": inbound_message_sid,
-                }
-            )
-            if attempts >= 3:
-                _send_webhook_text_reply(sender, "Access denied. Too many invalid passcode attempts. Start a new request.")
-                return WebhookResponse(message="Access denied. Too many invalid passcode attempts. Start a new request.")
-            _send_webhook_text_reply(sender, "Invalid passcode. Please try again.")
-            return WebhookResponse(message="Invalid passcode. Please try again.")
 
     if result is None:
         result, stale_count = _resolve_best_retrievable_document(body)
 
     if result.found and result.document is not None and result.document.is_private:
-        if not _private_access_code_configured():
-            request_logs.add(
-                {
-                    "request_id": request.state.request_id,
-                    "type": "private-access-audit",
-                    "sender": sender,
-                    "doc_id": result.document.id,
-                    "status": "access-blocked",
-                    "reason": "private-code-not-configured",
-                    "message_sid": inbound_message_sid,
-                }
-            )
-            _send_webhook_text_reply(sender, "Private access code is not configured in profile settings.")
-            return WebhookResponse(message="Private access code is not configured in profile settings.")
-
-        if not provided_access_code:
+        if not is_confirmation_reply:
             if sender:
-                _private_access_challenges[sender] = {"doc_id": result.document.id, "attempts": 0}
+                _private_access_challenges[sender] = {
+                    "doc_id": result.document.id,
+                    "expires_at": int(time.time()) + max(15, settings.private_confirmation_ttl_seconds),
+                }
 
             reply_sid = _send_webhook_text_reply(
                 sender,
                 (
                     f"{result.document.file_name} is a private document. "
-                    "Reply with your passcode (for example: code 1234)."
+                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
                 ),
             )
 
@@ -973,7 +948,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "sender": sender,
                     "doc_id": result.document.id,
                     "status": "challenge-issued",
-                    "reason": "passcode-required",
+                    "reason": "yes-confirmation-required",
                     "twilio_sid": reply_sid,
                     "message_sid": inbound_message_sid,
                 }
@@ -981,41 +956,9 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             return WebhookResponse(
                 message=(
                     f"{result.document.file_name} is a private document. "
-                    "Reply with your passcode (for example: code 1234)."
+                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
                 )
             )
-
-        if not _verify_access_code(provided_access_code):
-            if sender:
-                _private_access_challenges[sender] = {"doc_id": result.document.id, "attempts": 1}
-
-            request_logs.add(
-                {
-                    "request_id": request.state.request_id,
-                    "type": "private-access-audit",
-                    "sender": sender,
-                    "doc_id": result.document.id,
-                    "status": "access-denied",
-                    "reason": "invalid-passcode",
-                    "attempt": 1,
-                    "message_sid": inbound_message_sid,
-                }
-            )
-            _send_webhook_text_reply(sender, "Invalid passcode. Please try again.")
-            return WebhookResponse(message="Invalid passcode. Please try again.")
-
-        _private_access_challenges.pop(sender, None)
-        request_logs.add(
-            {
-                "request_id": request.state.request_id,
-                "type": "private-access-audit",
-                "sender": sender,
-                "doc_id": result.document.id,
-                "status": "access-granted",
-                "reason": "inline-passcode",
-                "message_sid": inbound_message_sid,
-            }
-        )
 
     if result.found and result.document is not None:
         message = f"Document found: {result.document.file_name}."
@@ -1043,7 +986,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "request_id": request.state.request_id,
                     "type": "webhook",
                     "sender": sender,
-                    "query": body,
+                    "query": safe_body,
                     "found": False,
                     "doc_id": result.document.id,
                     "twilio_sid": message_sid,
@@ -1072,7 +1015,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                         "request_id": request.state.request_id,
                         "type": "webhook",
                         "sender": sender,
-                        "query": body,
+                        "query": safe_body,
                         "found": False,
                         "doc_id": result.document.id,
                         "twilio_sid": message_sid,
@@ -1117,7 +1060,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 "request_id": request.state.request_id,
                 "type": "webhook",
                 "sender": sender,
-                "query": body,
+                "query": safe_body,
                 "found": True,
                 "doc_id": result.document.id,
                 "twilio_sid": message_sid,
@@ -1149,7 +1092,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                 "request_id": request.state.request_id,
                 "type": "webhook",
                 "sender": sender,
-                "query": body,
+                "query": safe_body,
                 "found": False,
                 "doc_id": None,
                 "twilio_sid": message_sid,
@@ -1167,7 +1110,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             "request_id": request.state.request_id,
             "type": "webhook",
             "sender": sender,
-            "query": body,
+            "query": safe_body,
             "found": False,
             "doc_id": None,
             "twilio_sid": no_match_sid,
