@@ -153,7 +153,7 @@ def test_upload_keeps_specific_category_even_if_suggestion_exists(tmp_path: Path
     assert uploaded["doc_category"] == "invoice"
 
 
-def test_private_upload_requires_access_code(tmp_path: Path) -> None:
+def test_private_upload_works_without_access_code(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
@@ -163,8 +163,8 @@ def test_private_upload_requires_access_code(tmp_path: Path) -> None:
         files={"file": ("pan_card.pdf", b"dummy-pdf-content", "application/pdf")},
     )
 
-    assert upload_response.status_code == 400
-    assert "Set your profile private access code first" in upload_response.json()["detail"]
+    assert upload_response.status_code == 200
+    assert upload_response.json()["document"]["is_private"] is True
 
 
 def test_profile_private_access_code_can_be_set(tmp_path: Path) -> None:
@@ -216,15 +216,6 @@ def test_legacy_per_document_private_code_is_ignored(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
-    set_code_response = client.post(
-        "/profile/private-access-code",
-        data={
-            "private_access_code": "2468",
-            "confirm_private_access_code": "2468",
-        },
-    )
-    assert set_code_response.status_code == 200
-
     upload_response = client.post(
         "/upload",
         data={"doc_category": "id", "tags": "pan", "is_private": "true"},
@@ -237,13 +228,23 @@ def test_legacy_per_document_private_code_is_ignored(tmp_path: Path) -> None:
     data[0]["access_code_hash"] = "legacy-hash-value"
     metadata_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    denial_response = client.post(
+    challenge_response = client.post(
         "/webhook",
         data={
             "From": "whatsapp:+12345678901",
             "Body": "send my pan card code 1111",
         },
     )
+    assert challenge_response.status_code == 200
+    assert "Reply 'YES'" in challenge_response.json()["message"]
 
-    assert denial_response.status_code == 200
-    assert "Invalid passcode" in denial_response.json()["message"]
+    approval_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "yes",
+        },
+    )
+
+    assert approval_response.status_code == 200
+    assert "Document found" in approval_response.json()["message"]
