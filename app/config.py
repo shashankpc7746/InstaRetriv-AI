@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     dashboard_username: str = "admin"
     dashboard_password: str = "admin123"
     dashboard_session_ttl_minutes: int = 720
+    private_confirmation_ttl_seconds: int = 45
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
