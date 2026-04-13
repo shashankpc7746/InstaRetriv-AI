@@ -62,6 +62,7 @@ _dashboard_sessions: dict[str, float] = {}
 
 _DASHBOARD_SESSION_COOKIE = "instaretriv_session"
 _PRIVATE_CONFIRM_REPLY = "yes"
+_PRIVATE_CONFIRM_ALT_REPLY = "1"
 
 _TERMINAL_DELIVERY_STATES = {"delivered", "read", "failed", "undelivered", "canceled"}
 
@@ -304,7 +305,30 @@ def _send_webhook_text_reply(sender: str, body: str) -> str | None:
 
 def _is_private_confirmation_reply(body: str) -> bool:
     normalized = (body or "").strip().lower()
-    return normalized in {"yes", "y", "ok", "confirm"}
+    return normalized in set(settings.private_confirmation_yes_keywords_list)
+
+
+def _is_private_cancel_reply(body: str) -> bool:
+    normalized = (body or "").strip().lower()
+    return normalized in set(settings.private_confirmation_cancel_keywords_list)
+
+
+def _private_confirmation_prompt_text(file_name: str) -> str:
+    return (
+        f"{file_name} is a private document. "
+        f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' or '{_PRIVATE_CONFIRM_ALT_REPLY}' within "
+        f"{settings.private_confirmation_ttl_seconds} seconds to confirm. "
+        "Reply 'CANCEL' to stop."
+    )
+
+
+def _private_pending_prompt_text(file_name: str) -> str:
+    return (
+        f"Pending private access for {file_name}. "
+        f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' or '{_PRIVATE_CONFIRM_ALT_REPLY}' within "
+        f"{settings.private_confirmation_ttl_seconds} seconds to confirm. "
+        "Reply 'CANCEL' to stop."
+    )
 
 
 def _sanitize_query_for_logs(text: str) -> str:
@@ -854,9 +878,26 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
         return WebhookResponse(message="Unauthorized sender.")
 
     is_confirmation_reply = _is_private_confirmation_reply(body)
+    is_cancel_reply = _is_private_cancel_reply(body)
     result: RetrievalResult | None = None
     stale_count = 0
     sender_challenge = _private_access_challenges.get(sender)
+
+    if sender and sender_challenge is None and (is_confirmation_reply or is_cancel_reply):
+        request_logs.add(
+            {
+                "request_id": request.state.request_id,
+                "type": "private-access-audit",
+                "sender": sender,
+                "doc_id": None,
+                "status": "no-active-challenge",
+                "reason": "confirmation-without-challenge",
+                "message_sid": inbound_message_sid,
+            }
+        )
+        _send_webhook_text_reply(sender, "No pending private confirmation. Please request a document first.")
+        return WebhookResponse(message="No pending private confirmation. Please request a document first.")
+
     if sender and sender_challenge:
         challenged_doc_id = str(sender_challenge.get("doc_id") or "")
         expires_at = int(sender_challenge.get("expires_at") or 0)
@@ -880,14 +921,23 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
             )
             _send_webhook_text_reply(sender, "Private confirmation expired. Please request your private file again.")
             return WebhookResponse(message="Private confirmation expired. Please request your private file again.")
-        elif not is_confirmation_reply:
-            reply_sid = _send_webhook_text_reply(
-                sender,
-                (
-                    f"Pending private access for {challenged_document.file_name}. "
-                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
-                ),
+        elif is_cancel_reply:
+            _private_access_challenges.pop(sender, None)
+            request_logs.add(
+                {
+                    "request_id": request.state.request_id,
+                    "type": "private-access-audit",
+                    "sender": sender,
+                    "doc_id": challenged_document.id,
+                    "status": "challenge-canceled",
+                    "reason": "user-cancel",
+                    "message_sid": inbound_message_sid,
+                }
             )
+            _send_webhook_text_reply(sender, "Private request canceled.")
+            return WebhookResponse(message="Private request canceled.")
+        elif not is_confirmation_reply:
+            reply_sid = _send_webhook_text_reply(sender, _private_pending_prompt_text(challenged_document.file_name))
             request_logs.add(
                 {
                     "request_id": request.state.request_id,
@@ -900,12 +950,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "message_sid": inbound_message_sid,
                 }
             )
-            return WebhookResponse(
-                message=(
-                    f"Pending private access for {challenged_document.file_name}. "
-                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
-                )
-            )
+            return WebhookResponse(message=_private_pending_prompt_text(challenged_document.file_name))
         else:
             _private_access_challenges.pop(sender, None)
             request_logs.add(
@@ -933,13 +978,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "expires_at": int(time.time()) + max(15, settings.private_confirmation_ttl_seconds),
                 }
 
-            reply_sid = _send_webhook_text_reply(
-                sender,
-                (
-                    f"{result.document.file_name} is a private document. "
-                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
-                ),
-            )
+            reply_sid = _send_webhook_text_reply(sender, _private_confirmation_prompt_text(result.document.file_name))
 
             request_logs.add(
                 {
@@ -953,12 +992,7 @@ async def whatsapp_webhook(request: Request) -> WebhookResponse:
                     "message_sid": inbound_message_sid,
                 }
             )
-            return WebhookResponse(
-                message=(
-                    f"{result.document.file_name} is a private document. "
-                    f"Reply '{_PRIVATE_CONFIRM_REPLY.upper()}' within {settings.private_confirmation_ttl_seconds} seconds to confirm."
-                )
-            )
+            return WebhookResponse(message=_private_confirmation_prompt_text(result.document.file_name))
 
     if result.found and result.document is not None:
         message = f"Document found: {result.document.file_name}."
