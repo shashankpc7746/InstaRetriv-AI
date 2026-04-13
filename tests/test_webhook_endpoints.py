@@ -391,6 +391,7 @@ def test_private_document_requires_yes_confirmation(tmp_path: Path) -> None:
     payload = webhook_response.json()
     assert "private document" in payload["message"].lower()
     assert "Reply 'YES'" in payload["message"]
+    assert "or '1'" in payload["message"]
     assert payload.get("matched_document_id") is None
 
     logs_response = client.get("/logs/recent", params={"limit": 30})
@@ -458,3 +459,75 @@ def test_private_document_access_granted_with_yes_confirmation(tmp_path: Path) -
     payload = webhook_response.json()
     assert payload["matched_document_id"] == private_doc_id
     assert "Document found" in payload["message"]
+
+
+def test_private_document_access_granted_with_numeric_confirmation(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    private_doc_id = _add_private_test_document(client)
+
+    challenge_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "send my pan card",
+        },
+    )
+    assert challenge_response.status_code == 200
+
+    webhook_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "1",
+        },
+    )
+
+    assert webhook_response.status_code == 200
+    payload = webhook_response.json()
+    assert payload["matched_document_id"] == private_doc_id
+    assert "Document found" in payload["message"]
+
+
+def test_private_document_challenge_can_be_canceled(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    _add_private_test_document(client)
+
+    challenge_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "send my pan card",
+        },
+    )
+    assert challenge_response.status_code == 200
+
+    cancel_response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "cancel",
+        },
+    )
+
+    assert cancel_response.status_code == 200
+    assert "canceled" in cancel_response.json()["message"].lower()
+
+
+def test_confirmation_without_active_challenge_is_handled(tmp_path: Path) -> None:
+    _configure_test_state(tmp_path)
+    client = TestClient(main_module.app)
+
+    response = client.post(
+        "/webhook",
+        data={
+            "From": "whatsapp:+12345678901",
+            "Body": "yes",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "No pending private confirmation" in response.json()["message"]
