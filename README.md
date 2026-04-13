@@ -18,7 +18,7 @@ What v2.1 achieved after v2.0:
 - Temporary debug surfaces removed from public API
 - Documentation aligned with production behavior
 - Upload page now supports Phase 13 smart-tag helpers and Phase 14 private-document controls
-- Private documents now use one global profile-level passcode instead of per-file passwords
+- Private documents now use short-lived WhatsApp confirmation (reply YES or 1) instead of typing reusable passcodes
 - Upload dashboard refreshed with a more modern, mobile-friendly layout
 
 ## Project Status
@@ -42,7 +42,7 @@ The system is live and operational with:
 - Upload files with categories and tags
 - Auto-enrich uploaded tags from the filename
 - Suggest a category when the uploaded category is generic
-- Mark sensitive files as private and protect them with one profile-level passcode
+- Mark sensitive files as private and unlock retrieval with short-lived WhatsApp confirmation
 - Retrieve documents using conversational queries
 - Match by keywords, synonyms, and fuzzy scoring
 - Deliver files through WhatsApp
@@ -214,7 +214,7 @@ python -m pytest -q
 - First fresh message after backend wake-up is processed (no forced warm-up-only drop).
 - The system sends a direct link only when WhatsApp media delivery fails.
 - The upload form now shows private-document controls and explains smart upload behavior.
-- The app now uses one private access code for all private documents, set from the profile security section.
+- Private document retrieval now uses short-lived WhatsApp confirmation prompts to reduce secret leakage in chat history.
 - Keep secrets rotated after validation.
 
 ## What v2.1 Solves

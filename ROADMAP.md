@@ -235,7 +235,7 @@ Completed
 ## Current Priorities
 
 1. Add upload-time intelligence for better tags.
-2. Add sensitive-document passcode protection.
+2. Improve private-document access safety with low-friction WhatsApp confirmation.
 3. Add delivery status tracking for Twilio callbacks.
 4. Add cleanup tooling for stale records and old uploads.
 
