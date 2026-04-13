@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     dashboard_password: str = "admin123"
     dashboard_session_ttl_minutes: int = 720
     private_confirmation_ttl_seconds: int = 45
+    private_confirmation_yes_keywords: str = "yes,y,ok,confirm,1,haan,ha"
+    private_confirmation_cancel_keywords: str = "no,n,cancel,stop,0"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -68,6 +70,18 @@ class Settings(BaseSettings):
             and self.cloudinary_api_key.strip()
             and self.cloudinary_api_secret.strip()
         )
+
+    @property
+    def private_confirmation_yes_keywords_list(self) -> list[str]:
+        if not self.private_confirmation_yes_keywords.strip():
+            return ["yes"]
+        return [item.strip().lower() for item in self.private_confirmation_yes_keywords.split(",") if item.strip()]
+
+    @property
+    def private_confirmation_cancel_keywords_list(self) -> list[str]:
+        if not self.private_confirmation_cancel_keywords.strip():
+            return ["cancel"]
+        return [item.strip().lower() for item in self.private_confirmation_cancel_keywords.split(",") if item.strip()]
 
 
 settings = Settings()
