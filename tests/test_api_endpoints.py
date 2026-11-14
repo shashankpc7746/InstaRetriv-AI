@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.services.whatsapp import WhatsAppSender
-from app.profile_settings_repository import ProfileSettingsRepository
 from app.repository import MetadataRepository
 from app.request_log_repository import RequestLogRepository
 from app.services.storage import LocalStorageService
@@ -15,12 +14,10 @@ def _configure_test_state(tmp_path: Path) -> None:
     upload_dir = tmp_path / "uploads"
     metadata_file = tmp_path / "metadata.json"
     request_log_file = tmp_path / "request_logs.json"
-    profile_settings_file = tmp_path / "profile_settings.json"
 
     main_module.repository = MetadataRepository(str(metadata_file))
     main_module.request_logs = RequestLogRepository(str(request_log_file))
     main_module.storage_service = LocalStorageService(str(upload_dir))
-    main_module.profile_settings_repo = ProfileSettingsRepository(str(profile_settings_file))
     main_module.whatsapp_sender = WhatsAppSender(account_sid="", auth_token="", sender="")
     main_module.settings.require_twilio_signature = False
     main_module.settings.authorized_senders = ""
@@ -167,7 +164,9 @@ def test_private_upload_works_without_access_code(tmp_path: Path) -> None:
     assert upload_response.json()["document"]["is_private"] is True
 
 
-def test_profile_private_access_code_can_be_set(tmp_path: Path) -> None:
+def test_profile_private_access_code_endpoint_is_removed(tmp_path: Path) -> None:
+    # Behaviour change (production hardening): the global private access code feature was
+    # removed; private documents use the short-lived WhatsApp YES/1 confirmation instead.
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
@@ -179,22 +178,13 @@ def test_profile_private_access_code_can_be_set(tmp_path: Path) -> None:
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["message"] == "Private access code updated."
+    assert response.status_code in {404, 405}
+    assert "private_access_code_set" not in client.get("/setup/status").json()
 
 
 def test_private_upload_sets_private_metadata(tmp_path: Path) -> None:
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
-
-    set_code_response = client.post(
-        "/profile/private-access-code",
-        data={
-            "private_access_code": "1234",
-            "confirm_private_access_code": "1234",
-        },
-    )
-    assert set_code_response.status_code == 200
 
     upload_response = client.post(
         "/upload",
@@ -210,6 +200,9 @@ def test_private_upload_sets_private_metadata(tmp_path: Path) -> None:
     uploaded = upload_response.json()["document"]
     assert uploaded["is_private"] is True
     assert "access_code_hash" not in uploaded
+    # The public schema never exposes server paths.
+    assert "storage_path" not in uploaded
+    assert uploaded["storage_kind"] == "local"
 
 
 def test_legacy_per_document_private_code_is_ignored(tmp_path: Path) -> None:

@@ -37,8 +37,12 @@ def test_upload_missing_file_name(tmp_path: Path) -> None:
         files={"file": ("", b"content", "application/pdf")},  # Empty filename
     )
 
-    # FastAPI returns 422 for validation errors on file upload
-    assert response.status_code == 422
+    # Starlette hands an empty-filename part over as a string; the handler answers 400, not 422.
+    assert response.status_code == 400
+    assert response.json()["detail"] == "File name is required."
+
+    missing = client.post("/upload", data={"doc_category": "resume"})
+    assert missing.status_code == 400
 
 
 def test_upload_missing_tags(tmp_path: Path) -> None:

@@ -1,45 +1,52 @@
-# Setup ngrok for InstaRetriv AI
-# Downloads ngrok CLI and configures it for local tunneling
+# Download the ngrok CLI into .\ngrok (git-ignored) for local Twilio testing.
+#   .\scripts\setup_ngrok.ps1             # tunnel hint for $env:PORT or 8000
+#   .\scripts\setup_ngrok.ps1 -Port 9000
+# After installing, add your ngrok authtoken once (not stored in this repo):
+#   .\ngrok\ngrok.exe config add-authtoken <your-token>
+param(
+    [int]$Port = 0
+)
+
+$ErrorActionPreference = "Stop"
+
+if ($Port -le 0) {
+    if ($env:PORT) { $Port = [int]$env:PORT } else { $Port = 8000 }
+}
 
 $ngrokUrl = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip"
-$ngrokDir = "$PSScriptRoot\..\ngrok"
-$ngrokZip = "$ngrokDir\ngrok.zip"
-
-Write-Host "Setting up ngrok..." -ForegroundColor Cyan
-
-# Create ngrok directory
-if (-not (Test-Path $ngrokDir)) {
-    New-Item -ItemType Directory -Path $ngrokDir | Out-Null
-    Write-Host "Created directory: $ngrokDir" -ForegroundColor Green
-}
-
-# Download ngrok
-Write-Host "Downloading ngrok..." -ForegroundColor Yellow
-try {
-    Invoke-WebRequest -Uri $ngrokUrl -OutFile $ngrokZip -ErrorAction Stop
-    Write-Host "Downloaded ngrok" -ForegroundColor Green
-} catch {
-    Write-Host "Failed to download ngrok: $_" -ForegroundColor Red
-    Write-Host "You can manually download from: https://ngrok.com/download" -ForegroundColor Yellow
-    exit 1
-}
-
-# Extract ngrok
-Write-Host "Extracting ngrok..." -ForegroundColor Yellow
-Expand-Archive -Path $ngrokZip -DestinationPath $ngrokDir -Force
-Write-Host "Extracted ngrok" -ForegroundColor Green
-
-# Clean up zip
-Remove-Item $ngrokZip -Force
-
-$ngrokExe = "$ngrokDir\ngrok.exe"
+$ngrokDir = Join-Path (Split-Path -Parent $PSScriptRoot) "ngrok"
+$ngrokZip = Join-Path $ngrokDir "ngrok.zip"
+$ngrokExe = Join-Path $ngrokDir "ngrok.exe"
 
 if (Test-Path $ngrokExe) {
-    Write-Host "ngrok installed successfully!" -ForegroundColor Green
-    Write-Host "Location: $ngrokExe" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "To start ngrok tunnel on port 8000, run:" -ForegroundColor Cyan
-    Write-Host "$ngrokExe http 8000" -ForegroundColor Yellow
+    Write-Host "ngrok already installed: $ngrokExe" -ForegroundColor Green
 } else {
-    Write-Host "Error: ngrok.exe not found after extraction" -ForegroundColor Red
+    Write-Host "Setting up ngrok..." -ForegroundColor Cyan
+    if (-not (Test-Path $ngrokDir)) {
+        New-Item -ItemType Directory -Path $ngrokDir | Out-Null
+    }
+
+    Write-Host "Downloading ngrok..." -ForegroundColor Yellow
+    try {
+        Invoke-WebRequest -Uri $ngrokUrl -OutFile $ngrokZip -UseBasicParsing
+    } catch {
+        Write-Host "Failed to download ngrok: $_" -ForegroundColor Red
+        Write-Host "You can download it manually from https://ngrok.com/download" -ForegroundColor Yellow
+        exit 1
+    }
+
+    Expand-Archive -Path $ngrokZip -DestinationPath $ngrokDir -Force
+    Remove-Item $ngrokZip -Force
+
+    if (-not (Test-Path $ngrokExe)) {
+        Write-Host "Error: ngrok.exe not found after extraction" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "ngrok installed: $ngrokExe" -ForegroundColor Green
 }
+
+Write-Host ""
+Write-Host "Start a tunnel to the local app (port $Port):" -ForegroundColor Cyan
+Write-Host "  & `"$ngrokExe`" http $Port" -ForegroundColor Yellow
+Write-Host "Then set PUBLIC_BASE_URL in .env to the https forwarding URL, restart the app, and"
+Write-Host "point the Twilio sandbox 'When a message comes in' webhook to <that URL>/webhook (HTTP POST)."

@@ -1,2 +1,4 @@
+# Development and test dependencies (local only).
+-r requirements.txt
 pytest==8.3.5
 httpx==0.28.1

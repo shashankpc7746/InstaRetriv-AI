@@ -4,7 +4,6 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app.profile_settings_repository import ProfileSettingsRepository
 from app.repository import MetadataRepository
 from app.request_log_repository import RequestLogRepository
 from app.services.storage import LocalStorageService
@@ -14,12 +13,10 @@ def _configure_test_state(tmp_path: Path) -> None:
     upload_dir = tmp_path / "uploads"
     metadata_file = tmp_path / "metadata.json"
     request_log_file = tmp_path / "request_logs.json"
-    profile_settings_file = tmp_path / "profile_settings.json"
 
     main_module.repository = MetadataRepository(str(metadata_file))
     main_module.request_logs = RequestLogRepository(str(request_log_file))
     main_module.storage_service = LocalStorageService(str(upload_dir))
-    main_module.profile_settings_repo = ProfileSettingsRepository(str(profile_settings_file))
     main_module.settings.require_twilio_signature = False
     main_module.settings.authorized_senders = ""
     main_module.settings.dashboard_auth_enabled = False
@@ -37,16 +34,16 @@ def test_dashboard_redirects_to_login_when_auth_enabled(tmp_path: Path) -> None:
 
 
 def test_protected_endpoint_requires_login_when_auth_enabled(tmp_path: Path) -> None:
+    # The access-code endpoint used here before was removed; /upload is the equivalent
+    # protected write endpoint.
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
     with patch.object(main_module.settings, "dashboard_auth_enabled", True):
         response = client.post(
-            "/profile/private-access-code",
-            data={
-                "private_access_code": "1234",
-                "confirm_private_access_code": "1234",
-            },
+            "/upload",
+            data={"doc_category": "resume", "tags": "cv"},
+            files={"file": ("resume.pdf", b"dummy", "application/pdf")},
         )
 
     assert response.status_code == 401
