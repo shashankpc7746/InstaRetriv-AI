@@ -1,3 +1,4 @@
+# Runtime dependencies (installed on Render). Keep versions pinned.
 fastapi==0.115.12
 uvicorn==0.34.0
 python-multipart==0.0.20
@@ -6,3 +7,4 @@ rapidfuzz==3.12.2
 twilio==9.5.1
 pymongo==4.10.1
 cloudinary==1.41.0
+requests==2.32.5

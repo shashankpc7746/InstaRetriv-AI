@@ -1,7 +1,25 @@
+# Secrets
 .env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
+*.py[cod]
 .pytest_cache/
 .venv/
 venv/
+
+# Local runtime data (uploads, JSON metadata/logs, quarantined corrupt files)
 uploads/
 data/
+
+# Local tools
+ngrok/
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

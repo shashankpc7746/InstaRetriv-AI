@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.config import settings
-from app.profile_settings_repository import ProfileSettingsRepository
 from app.repository import MetadataRepository
 from app.request_log_repository import RequestLogRepository
 from app.services.storage import LocalStorageService
@@ -21,28 +20,15 @@ def _configure_test_state(tmp_path: Path) -> None:
     upload_dir = tmp_path / "uploads"
     metadata_file = tmp_path / "metadata.json"
     request_log_file = tmp_path / "request_logs.json"
-    profile_settings_file = tmp_path / "profile_settings.json"
 
     main_module.repository = MetadataRepository(str(metadata_file))
     main_module.request_logs = RequestLogRepository(str(request_log_file))
     main_module.storage_service = LocalStorageService(str(upload_dir))
-    main_module.profile_settings_repo = ProfileSettingsRepository(str(profile_settings_file))
     main_module.whatsapp_sender = WhatsAppSender(account_sid="", auth_token="", sender="")
     main_module.settings.require_twilio_signature = False
     main_module.settings.authorized_senders = ""
     main_module.settings.public_base_url = ""
     main_module.settings.dashboard_auth_enabled = False
-
-
-def _set_private_access_code(client: TestClient, code: str = "1234") -> None:
-    response = client.post(
-        "/profile/private-access-code",
-        data={
-            "private_access_code": code,
-            "confirm_private_access_code": code,
-        },
-    )
-    assert response.status_code == 200
 
 
 def _add_test_document(client: TestClient) -> str:
@@ -113,7 +99,7 @@ def test_webhook_with_no_document_match(tmp_path: Path) -> None:
 
 
 def test_webhook_with_missing_from_field(tmp_path: Path) -> None:
-    """Test webhook handles missing From field gracefully."""
+    """Test webhook rejects a request without a sender."""
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
@@ -127,10 +113,10 @@ def test_webhook_with_missing_from_field(tmp_path: Path) -> None:
         },
     )
 
-    assert webhook_response.status_code == 200
-    # Empty From should still process but may not send
-    payload = webhook_response.json()
-    assert "message" in payload
+    # Behaviour change: an empty From is rejected (it previously let a bare YES keyword
+    # bypass the private-document confirmation).
+    assert webhook_response.status_code == 400
+    assert webhook_response.json()["detail"] == "Missing sender"
 
 
 def test_webhook_with_missing_body_field(tmp_path: Path) -> None:
@@ -229,7 +215,9 @@ def test_webhook_logs_request(tmp_path: Path) -> None:
     assert len(webhook_logs) > 0
 
     latest_webhook_log = webhook_logs[-1]
-    assert latest_webhook_log["sender"] == "whatsapp:+12345678901"
+    # Behaviour change: senders are masked in request logs and log API output.
+    assert latest_webhook_log["sender"] == "+12*****8901"
+    assert "12345678901" not in str(logs)
     assert latest_webhook_log["query"] == "resume"
     assert latest_webhook_log["found"] is True
     assert latest_webhook_log["doc_id"] == doc_id
@@ -403,7 +391,9 @@ def test_private_document_requires_yes_confirmation(tmp_path: Path) -> None:
     assert any(entry.get("status") == "challenge-issued" for entry in audit_logs)
 
 
-def test_private_document_pending_challenge_repeats_until_yes(tmp_path: Path) -> None:
+def test_private_document_new_query_supersedes_pending_challenge(tmp_path: Path) -> None:
+    # Behaviour change (product decision): a new non-keyword message no longer re-prompts
+    # "Pending private access"; it drops the old challenge and is processed as a new query.
     _configure_test_state(tmp_path)
     client = TestClient(main_module.app)
 
@@ -423,12 +413,19 @@ def test_private_document_pending_challenge_repeats_until_yes(tmp_path: Path) ->
         "/webhook",
         data={
             "From": "whatsapp:+12345678901",
-            "Body": "ok send",
+            # A real new request (with searchable words) supersedes the pending challenge.
+            "Body": "send my passport",
         },
     )
 
     assert not_yes_response.status_code == 200
-    assert "Pending private access" in not_yes_response.json()["message"]
+    assert "Pending private access" not in not_yes_response.json()["message"]
+    assert "Document not found" in not_yes_response.json()["message"]
+
+    # The old challenge is gone: a YES now has nothing to confirm.
+    yes_response = client.post("/webhook", data={"From": "whatsapp:+12345678901", "Body": "yes"})
+    assert "No pending private confirmation" in yes_response.json()["message"]
+    assert yes_response.json().get("matched_document_id") is None
 
 
 def test_private_document_access_granted_with_yes_confirmation(tmp_path: Path) -> None:

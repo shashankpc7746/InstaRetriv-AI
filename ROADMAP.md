@@ -1,348 +1,122 @@
 # InstaRetriv AI - Roadmap
 
+**Current version: v3.0 (production hardening)**
+
 ## Product Goal
 
-Build a WhatsApp-first document assistant that can store, understand, and retrieve personal files quickly and reliably.
-
-## Current Direction
-
-The project has moved from local MVP into a real deployed system:
-- Production deployment is live on Render
-- Metadata is stored in MongoDB Atlas
-- Files are stored in Cloudinary
-- Twilio webhook flow is working end-to-end
-- Retrieval logic now handles stale records more gracefully
+Build a WhatsApp-first personal document vault that stores, understands, and retrieves files quickly,
+reliably, and securely.
 
 ## Scope
 
-- Single-user workflow
-- WhatsApp-based document access
-- Manual upload with tags today
-- Smarter upload and security features next
-
-## Success Criteria
-
-- Upload a document and store metadata successfully
-- Send a WhatsApp query and get the correct file or link
-- Survive redeploys without losing file delivery capability
-- Keep logs, health checks, and status checks working
+- Single-user vault (one dashboard owner, an allowlist of WhatsApp numbers)
+- WhatsApp-based retrieval through Twilio
+- Upload from a private web dashboard
 
 ## Architecture
 
-- Backend: FastAPI
-- Messaging: Twilio WhatsApp Sandbox
-- Metadata DB: MongoDB Atlas
-- File storage: Cloudinary
-- Matching: keyword, synonym, fuzzy scoring
+- Backend: FastAPI + Uvicorn on Render
+- Messaging: Twilio WhatsApp (sandbox today)
+- Metadata and logs: MongoDB Atlas (JSON files for local development)
+- File storage: Cloudinary private (`authenticated`) assets, streamed through `/files` (local disk for
+  development)
+- Matching: keywords, synonyms and RapidFuzz fuzzy matching
 
 ---
 
-## Phase 0 - Planning and Setup
+## Shipped
 
-### Status
-Completed
+| Phase | Status | Summary |
+|-------|--------|---------|
+| 0 - Planning and setup | Done | Repo, environment, dependencies, environment template |
+| 1 - Data and storage layer | Done | Metadata schema, JSON and MongoDB repositories, local and Cloudinary storage |
+| 2 - Upload pipeline | Done | `POST /upload` with type validation, category, tags |
+| 3 - WhatsApp webhook | Done | `POST /webhook`, signature validation, sender allowlist |
+| 4 - Retrieval logic | Done | Keywords, synonyms, fuzzy matching, best-match selection |
+| 5 - WhatsApp delivery | Done | Media sending, retries, link fallback |
+| 6 - Logging and reliability | Done | Request IDs, health and setup status, structured logs |
+| 6.5 - Document lifecycle | Done | Listing and soft archive |
+| 7 - Testing | Done | Pytest suite (hermetic, no network) |
+| 8 - Deployment | Done | Render service and Twilio webhook |
+| 9 - MongoDB metadata | Done | Atlas backend with availability reporting |
+| 10 - Cloudinary storage | Done | Durable storage that survives redeploys |
+| 11 - Mixed old/new files | Done | Missing local files skipped, not served |
+| 12 - Delivery recovery | Done | Link fallback only when media delivery fails |
+| 12.5 - Cold start / duplicates | Done | MessageSid deduplication; first fresh message processed |
+| 13 - Smart upload intelligence | Done | Filename tags, category suggestion (explicit categories such as `id` kept) |
+| 14 - Secure vault mode | Done | Private documents with short-lived WhatsApp YES/1 confirmation and audit log (passcodes removed) |
+| 15 - Delivery observability | Done | `POST /webhook/status`, `GET /logs/delivery`, `GET /logs/delivery/summary` |
+| 16 - Admin dashboard | Done (v3.0) | Login, status panel with warnings, upload, documents, test query, recent activity |
 
-### Achievements
-- Repository structure created
-- Python environment configured
-- Runtime and dev dependencies established
-- Environment template introduced
+### v3.0 - Production hardening (shipped)
 
----
-
-## Phase 1 - Core Data and Storage Layer
-
-### Status
-Completed
-
-### Achievements
-- Metadata schema created
-- JSON repository implemented
-- MongoDB repository added
-- Local storage service introduced
-- Cloudinary storage backend added later for durability
-
----
-
-## Phase 2 - Upload Pipeline
-
-### Status
-Completed
-
-### Achievements
-- `POST /upload` implemented
-- File type validation added
-- Category and tags saved with each document
-- Local and cloud storage support added
-
----
-
-## Phase 3 - WhatsApp Webhook Integration
-
-### Status
-Completed
-
-### Achievements
-- `POST /webhook` implemented
-- Twilio signature validation supported
-- Sender restrictions added
-- Webhook request logging added
-
----
-
-## Phase 4 - Retrieval Logic
-
-### Status
-Completed
-
-### Achievements
-- Keyword matching implemented
-- Synonym mapping added
-- Fuzzy fallback added
-- Best-match selection stabilized
-
----
-
-## Phase 5 - Send Document via WhatsApp
-
-### Status
-Completed
-
-### Achievements
-- Outbound WhatsApp media sending added
-- Retry logic added
-- Public media URL generation added
-- Direct link fallback added for delivery failures
+- **Access control:**
+  - Dashboard login is on by default, with no default password.
+  - Failed logins are rate-limited per IP, with lockout.
+  - Sessions are signed with `APP_SECRET_KEY`.
+  - Every non-public route needs login.
+- **Private files:**
+  - `/files/{id}` needs a dashboard session or a short-lived HMAC-signed link.
+  - Cloudinary uploads are `authenticated` and streamed by the app.
+  - Archived documents are never served.
+- **Webhook security:**
+  - Twilio signatures are always enforced in production, and checked before deduplication.
+  - The check is proxy-aware (`PUBLIC_BASE_URL`, `X-Forwarded-*`).
+- **Confirmation flow:**
+  - A bare keyword is never run as a search.
+  - A new query supersedes a pending confirmation.
+  - Expired confirmations are reported clearly.
+  - The prompt shows the configured keywords and the enforced time.
+- **Matching quality:**
+  - Filler words and 1-character tokens are ignored.
+  - Fuzzy matching is safer, using `ratio` on words of 4+ letters.
+  - Filename words are searchable.
+  - Unicode text is supported.
+- **Reliability:**
+  - No silent fallback to temporary disk in production. `/health` reports `degraded` and `/ready` returns 503.
+  - MongoDB connections are retried.
+  - Atomic JSON writes, and corrupt files are quarantined.
+  - Blocking work runs off the event loop.
+  - Transient errors never archive documents.
+  - Twilio sends are retried only for transient errors.
+- **Privacy:** Numbers are masked and message text is cleaned in logs.
+- **Operations:**
+  - Pinned runtime dependencies, with dev dependencies split out.
+  - Python 3.12.8 pinned.
+  - Proxy headers on Render.
+  - Auto-reload only in development.
+  - A complete `.env.example`.
+  - The ngrok binary is no longer tracked in git.
 
 ---
 
-## Phase 6 - Logging, Reliability, and Hardening
-
-### Status
-Completed
-
-### Achievements
-- Request ID middleware added
-- Health endpoint added
-- Setup status endpoint added
-- Error logging improved
-- Delivery tracing improved
-
----
-
-## Phase 6.5 - Document Lifecycle Management
-
-### Status
-Completed
-
-### Achievements
-- Document listing endpoint added
-- Archive/deactivate flow added
-- Stale record cleanup behavior introduced
-
----
-
-## Phase 7 - Testing and Validation
-
-### Status
-Completed
-
-### Achievements
-- Test suite created
-- Webhook tests added
-- Error handling tests added
-- 26 automated tests previously verified as passing
-
----
-
-## Phase 8 - Deployment
-
-### Status
-Completed
-
-### Achievements
-- Render deployment configured
-- Production service live
-- Twilio webhook connected
-- Production health and setup checks verified
-
----
-
-## Phase 9 - MongoDB Metadata Backend
-
-### Status
-Completed
-
-### Achievements
-- MongoDB integration wired into app settings
-- Backend toggle added
-- Fallback behavior preserved
-- Live Atlas metadata storage verified
-
----
-
-## Phase 10 - Cloudinary Durable File Storage
-
-### Status
-Completed
-
-### Achievements
-- Cloudinary file backend integrated
-- Render file durability improved
-- Remote media delivery supported
-- PDF and document handling made more reliable
-
----
-
-## Phase 11 - Retrieval Stability for Mixed Old/New Files
-
-### Status
-Completed
-
-### Achievements
-- Stale local-file matches auto-skipped
-- Missing file records auto-archived
-- Next-best retrievable document selected automatically
-- Broken file references prevented from blocking retrieval
-
----
-
-## Phase 12 - Delivery Recovery Improvements
-
-### Status
-Completed
-
-### Achievements
-- Link fallback used only when media delivery fails
-- Successful media sends no longer trigger extra link messages
-- Better user experience for WhatsApp delivery flows
-
----
-
-## Phase 12.5 - Cold-Start and Duplicate Retry Reliability
-
-### Status
-Completed
-
-### Achievements
-- Replaced blanket cold-start blocking behavior
-- Added MessageSid-based webhook deduplication
-- Preserved first fresh user message processing after wake-up
-- Prevented duplicate/retried webhook events from replaying stale commands
-
----
-
-## Current Priorities
-
-1. Add upload-time intelligence for better tags.
-2. Improve private-document access safety with low-friction WhatsApp confirmation.
-3. Add delivery status tracking for Twilio callbacks.
-4. Add cleanup tooling for stale records and old uploads.
-
----
-
-## Next Planned Phases
-
-## Phase 13 - Smart Upload Intelligence
-
-### Status
-In Progress
-
-### Goal
-Reduce manual tag work and improve retrieval quality at upload time.
-
-### Outcomes
-- Better document classification
-- Smarter tags from filenames and content hints
-- Less user effort during upload
-
-### Next Checkpoints
-- Add filename-based auto-tag extraction during upload (completed)
-- Add optional category suggestion from detected keywords (completed)
-- Add confidence-aware merge between manual tags and auto-tags
-
----
-
-## Phase 14 - Secure Vault Mode
-
-### Status
-In Progress
-
-### Goal
-Protect highly sensitive documents with extra verification.
-
-### Outcomes
-- Optional private-document flag with one global profile-level passcode
-- Controlled access over WhatsApp
-- Better protection for identity and financial files
-
-### Next Checkpoints
-- Add global profile-level private access code for all private documents (completed)
-- Keep private file toggle at upload and enforce passcode challenge in webhook flow (completed)
-- Add audit log entries for private-document access attempts (completed)
-
----
-
-## Future Optimization Backlog
-
-### Goal
-Make the app more flexible, more usable, and less manual as it grows.
-
-### Ideas to Prioritize Later
-- Add login and account management so only authorized users can access the dashboard
-- Support multi-user vaults with per-user isolation for documents and settings
-- Add OCR and semantic retrieval so uploads become searchable by document content
-- Add a richer dashboard with activity feed, access timeline, and quick actions
-- Add stronger security options like OTP, device trust, and session locking
-- Add smarter auto-tagging with confidence scoring and user correction feedback
-- Add usage analytics and delivery health indicators to spot failures faster
-
----
-
-## Phase 15 - Delivery Observability
-
-### Status
-In Progress
-
-### Goal
-Track whether a WhatsApp delivery truly reached the user.
-
-### Outcomes
-- Delivery callback logging
-- Better failure diagnosticsn dash
-- Clearer message lifecycle state
-
-### Initial Implementation Completed
-- Added Twilio status callback endpoint (`POST /webhook/status`)
-- Added delivery observability endpoint (`GET /logs/delivery`)
-- Correlated outbound Twilio message SID values with callback statuses
-- Added normalized delivery lifecycle states per message SID
-- Added delivery diagnostics summary endpoint (`GET /logs/delivery/summary`)
-
----
-
-## Phase 16 - Admin and Control Center
-
-### Goal
-Give a simple operational view of documents, delivery, and cleanup.
-
-### Outcomes
-- Document health view
-- Cleanup actions
-- Retrieval analytics
-
----
-
-## Long-Term Direction
-
-- Multi-user support
-- Semantic retrieval
-- Optional dashboard
-- Smarter intent handling
-- Cloud file migration utilities
-
----
-
-## Final Branding Attempt (Later)
-
-At the end of core roadmap execution, we will try to move from Twilio sandbox branding to a production WhatsApp Business sender so the display name can be set to InstaRetri AI and a custom profile photo can be used (subject to Meta/Twilio approval).
+## Next Steps
+
+### 1. WhatsApp Business API sender
+- Move from the Twilio sandbox to an approved WhatsApp Business sender (display name "InstaRetriv AI",
+  profile photo). This removes the 72-hour sandbox re-join and the `join <code>` step.
+- Add approved message templates for replies outside the 24-hour session window.
+
+### 2. Multi-user support
+- Per-user vaults (documents, allowlisted numbers, settings) with isolated storage prefixes.
+- User accounts for the dashboard, with optional TOTP two-factor login.
+
+### 3. Backups and data safety
+- Scheduled MongoDB exports (Atlas backups on a paid tier, or a nightly `mongodump` job).
+- A Cloudinary-to-object-storage backup or export tool, and a tool to restore metadata from storage.
+- An "orphan check" that lists metadata without files and files without metadata.
+
+### 4. Monitoring and alerting
+- Uptime monitoring on `/ready`, with alerts by email or WhatsApp.
+- Error tracking (for example Sentry) and structured JSON logs shipped to a log service.
+- Alerts on repeated delivery failures from `/logs/delivery/summary`.
+
+### 5. Retrieval and usability
+- OCR and semantic search over document contents.
+- Multiple matches: reply with a numbered list ("1. Resume 2024, 2. Resume 2022").
+- Tag and category editing in the dashboard, and restoring archived documents.
+- Usage analytics (top queries, misses), to improve synonyms and tags.
+
+### 6. Platform
+- A paid Render instance (no cold starts) or keep-warm pings.
+- CI (GitHub Actions) running `pytest` on every push, plus dependency update checks.
